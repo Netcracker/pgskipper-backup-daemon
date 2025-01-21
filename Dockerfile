@@ -41,7 +41,7 @@ RUN apt-get --no-install-recommends install -y comerr-dev \
                        postgresql-13 postgresql-14 postgresql-15 postgresql-16 \
                        jq \
                        openssl curl  
-RUN python3 -m pip install -U setuptools 
+RUN python3 -m pip install -U setuptools==70.0.0 
 RUN python3 -m pip install --no-cache-dir -r /root/requirements.txt \
       && python3 -m pip install --upgrade pip \
       && python3 -m pip install grpcio \
