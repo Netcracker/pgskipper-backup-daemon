@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM golang:1.22.5-alpine3.19 as builder
+FROM --platform=$BUILDPLATFORM golang:1.22.5-alpine3.19 AS builder
 
 ENV GO111MODULE=on
 
@@ -56,7 +56,7 @@ RUN python3 -m pip install --no-cache-dir -r /root/requirements.txt \
 
 RUN ln -s /usr/bin/python3 /usr/bin/python
 
-COPY --from=builder --chown=${USER_UID} /workspace/_output/bin/azure_restore /opt/backup/
+COPY --from=builder /workspace/_output/bin/azure_restore /opt/backup/
 COPY docker/postgres/ docker/health.sh /opt/backup/
 COPY docker/granular /opt/backup/granular
 COPY docker/postgres/encryption.py /opt/backup/granular/encryption.py
