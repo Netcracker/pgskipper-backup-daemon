@@ -195,15 +195,9 @@ class BackRestVault(storage.Vault):
 
         return self.folder, self.metrics, self.console
 
-    #def create_time(self):
-    #    foldername = self.get_id()
-    #    self.__log.info("folder name logged: %s" % self.foldername)
-    #    d = datetime.strptime(foldername, VAULT_NAME_FORMAT)
-    #    return time.mktime(d.timetuple())
     
     def create_time(self):
         foldername = self.get_id()
-        self.__log.info("folder name logged: %s" % foldername)
 
         # If foldername has the 'backup-' prefix, return a default time
         if foldername.startswith("backup-"):
