@@ -136,8 +136,7 @@ class PgBackRestRecovery():
         log.info(f"Data {patroni_config_data}")
         dict_data = yaml.load(patroni_config_data,Loader=yaml.FullLoader)
         dict_data["bootstrap"]["pgbackrest"] = {
-            "command": f"pgbackrest --stanza=patroni --delta --type={restore_type} --target='{target}' --target-action=promote restore" 
-            f"--spool-path=/tmp/pgbackrest-spool",
+            "command": f"pgbackrest --stanza=patroni --delta --type={restore_type} --target='{target}' --target-action=promote --spool-path=/tmp/pgbackrest-spool restore",
             "keep_existing_recovery_conf": "True",
             "no_params": "True"
         }
