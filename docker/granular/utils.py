@@ -83,6 +83,7 @@ def execute_query(conn_properties, query):
 
 def get_version_of_pgsql_server():
     conn_properties = configs.connection_properties()
+    log.info(f"Connecting to PostgreSQL with properties: {conn_properties}")
     result = execute_query(conn_properties, 'SHOW SERVER_VERSION;')
     return list(map(int, result.split(' ')[0].split('.')))
 
