@@ -137,6 +137,36 @@ class PostgreSQLDumpWorker(Thread):
             if conn:
                 conn.close()
 
+    def drop_pg_hint_plan_extension(self, database):
+        connection_properties = configs.connection_properties()
+        connection_properties['dbname'] = database
+        conn = None
+        try:
+            conn = psycopg2.connect(**connection_properties)
+            with conn.cursor() as cur:
+                cur.execute("DROP EXTENSION IF EXISTS pg_hint_plan CASCADE;")
+                self.log.info(self.log_msg(f"Dropped pg_hint_plan extension in '{database}'"))
+        except Exception as e:
+            raise backups.BackupFailedException(database, f"Failed to drop pg_hint_plan: {e}")
+        finally:
+            if conn:
+                conn.close()
+
+    def recreate_pg_hint_plan_extension(self, database):
+        connection_properties = configs.connection_properties()
+        connection_properties['dbname'] = database
+        conn = None
+        try:
+            conn = psycopg2.connect(**connection_properties)
+            with conn.cursor() as cur:
+                cur.execute("CREATE EXTENSION IF NOT EXISTS pg_hint_plan;")
+                self.log.info(self.log_msg(f"Recreated pg_hint_plan extension in '{database}'"))
+        except Exception as e:
+            raise backups.BackupFailedException(database, f"Failed to recreate pg_hint_plan: {e}")
+        finally:
+            if conn:
+                conn.close()
+
     def backup_single_database(self, database):
         self.log.info(self.log_msg("Start processing database '{}'.".format(database)))
         self.log.info(self.log_msg("Will use binaries: '{}' for backup.".format(self.bin_path)))
@@ -160,6 +190,10 @@ class PostgreSQLDumpWorker(Thread):
         if configs.postgres_password():
          os.environ['PGPASSWORD'] = configs.postgres_password()
 
+        #dropping pg_hint_plan extension before pg_dump execution.
+        if configs.is_external_pg():
+            self.drop_pg_hint_plan_extension(database)
+
         if int(self.parallel_jobs) > 1:
             command = ['{}/pg_dump'.format(self.bin_path),
                     '--format=directory',
@@ -173,6 +207,9 @@ class PostgreSQLDumpWorker(Thread):
                     '--blobs']
 
             command.extend(['-j', self.parallel_jobs])
+
+            #if configs.is_external_pg():  # Check if external database is configured
+            #    command.append('--exclude-extension=pg_hint_plan')  # Adding exclusion for pg_hint_plan if extenal database
 
             # Zero is corner-case in Python :(
             if self.compression_level or self.compression_level == 0:
@@ -212,6 +249,9 @@ class PostgreSQLDumpWorker(Thread):
 
             if self.compression_level or self.compression_level == 0:
                 command.extend(['-Z', str(self.compression_level)])
+
+            #if configs.is_external_pg():  # Check if external database is configured
+            #    command.append('--exclude-extension=pg_hint_plan')  # Adding exclusion for pg_hint_plan if extenal database
 
             database_backup_path = backups.build_database_backup_path(self.backup_id, database,
                                                                   self.namespace, self.external_backup_root)
@@ -254,6 +294,9 @@ class PostgreSQLDumpWorker(Thread):
 
         roles = self.fetch_roles(database)
         self.dump_roles_for_db(roles, database)
+        #recreating pg_hint_plan extension after pg_dump execution ends
+        if configs.is_external_pg():
+            self.recreate_pg_hint_plan_extension(database)
         self.update_status('duration', (int(time.time() - start)), database)
         self.log.info(self.log_msg("Finished processing of database '%s'." % database))
         if self.s3:
