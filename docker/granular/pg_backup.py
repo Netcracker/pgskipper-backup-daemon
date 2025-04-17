@@ -139,7 +139,7 @@ class PostgreSQLDumpWorker(Thread):
 
     def drop_pg_hint_plan_extension(self, database):
         connection_properties = configs.connection_properties()
-        connection_properties['dbname'] = database
+        connection_properties['database'] = database
         conn = None
         try:
             conn = psycopg2.connect(**connection_properties)
@@ -154,7 +154,7 @@ class PostgreSQLDumpWorker(Thread):
 
     def recreate_pg_hint_plan_extension(self, database):
         connection_properties = configs.connection_properties()
-        connection_properties['dbname'] = database
+        connection_properties['database'] = database
         conn = None
         try:
             conn = psycopg2.connect(**connection_properties)
