@@ -137,6 +137,7 @@ class PostgreSQLDumpWorker(Thread):
             if conn:
                 conn.close()
 
+    #cannot be used for azure, need to drop
     def drop_pg_hint_plan_extension(self, database):
         connection_properties = configs.connection_properties()
         connection_properties['database'] = database
@@ -152,6 +153,7 @@ class PostgreSQLDumpWorker(Thread):
             if conn:
                 conn.close()
 
+    #cannot be used for azure, need to drop
     def recreate_pg_hint_plan_extension(self, database):
         connection_properties = configs.connection_properties()
         connection_properties['database'] = database
@@ -166,6 +168,25 @@ class PostgreSQLDumpWorker(Thread):
         finally:
             if conn:
                 conn.close()
+
+    #new implementation for azure
+    def get_included_extensions(self, database):
+        connection_properties = configs.connection_properties()
+        connection_properties['database'] = database
+        conn = None
+        try:
+            conn = psycopg2.connect(**connection_properties)
+            with conn.cursor() as cur:
+                cur.execute("SELECT extname FROM pg_extension WHERE extname != 'pg_hint_plan'")
+                included_extensions = [row[0] for row in cur]
+                self.log.info(self.log_msg(f"Fetched included extensions for '{database}': {included_extensions}"))
+                return included_extensions
+        except Exception as e:
+            raise backups.BackupFailedException(database, f"Failed to fetch included extensions: {e}")
+        finally:
+            if conn:
+                conn.close()
+
 
     def backup_single_database(self, database):
         self.log.info(self.log_msg("Start processing database '{}'.".format(database)))
@@ -191,8 +212,14 @@ class PostgreSQLDumpWorker(Thread):
          os.environ['PGPASSWORD'] = configs.postgres_password()
 
         #dropping pg_hint_plan extension before pg_dump execution.
+        #if configs.is_external_pg():
+        #    self.drop_pg_hint_plan_extension(database)
+
+        extension_flags = []
         if configs.is_external_pg():
-            self.drop_pg_hint_plan_extension(database)
+            included_exts = self.get_included_extensions(database)
+            if included_exts:  # Only add --extension if there are extensions
+                extension_flags.extend(['--extension', ','.join(included_exts)])
 
         if int(self.parallel_jobs) > 1:
             command = ['{}/pg_dump'.format(self.bin_path),
@@ -207,6 +234,9 @@ class PostgreSQLDumpWorker(Thread):
                     '--blobs']
 
             command.extend(['-j', self.parallel_jobs])
+
+            if configs.is_external_pg():
+                command.extend(extension_flags)
 
             #if configs.is_external_pg():  # Check if external database is configured
             #    command.append('--exclude-extension=pg_hint_plan')  # Adding exclusion for pg_hint_plan if extenal database
@@ -249,6 +279,9 @@ class PostgreSQLDumpWorker(Thread):
 
             if self.compression_level or self.compression_level == 0:
                 command.extend(['-Z', str(self.compression_level)])
+
+            if configs.is_external_pg():
+                command.extend(extension_flags)
 
             #if configs.is_external_pg():  # Check if external database is configured
             #    command.append('--exclude-extension=pg_hint_plan')  # Adding exclusion for pg_hint_plan if extenal database
@@ -294,9 +327,11 @@ class PostgreSQLDumpWorker(Thread):
 
         roles = self.fetch_roles(database)
         self.dump_roles_for_db(roles, database)
+
         #recreating pg_hint_plan extension after pg_dump execution ends
-        if configs.is_external_pg():
-            self.recreate_pg_hint_plan_extension(database)
+        #if configs.is_external_pg():
+        #    self.recreate_pg_hint_plan_extension(database)
+
         self.update_status('duration', (int(time.time() - start)), database)
         self.log.info(self.log_msg("Finished processing of database '%s'." % database))
         if self.s3:
