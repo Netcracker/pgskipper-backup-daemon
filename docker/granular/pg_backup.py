@@ -183,8 +183,10 @@ class PostgreSQLDumpWorker(Thread):
         extension_flags = []
         if configs.is_external_pg():
             included_exts = self.get_included_extensions(database)
-            if included_exts:  # Only add --extension if there are extensions
-                extension_flags.extend(['--extension', ','.join(included_exts)])
+            if included_exts:
+            # Add each extension as a separate --extension flag
+                for ext in included_exts:
+                    extension_flags.extend(['--extension', ext])
 
         if int(self.parallel_jobs) > 1:
             command = ['{}/pg_dump'.format(self.bin_path),
