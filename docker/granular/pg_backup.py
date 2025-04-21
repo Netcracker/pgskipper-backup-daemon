@@ -209,8 +209,6 @@ class PostgreSQLDumpWorker(Thread):
             if self.compression_level or self.compression_level == 0:
                 command.extend(['-Z', str(self.compression_level)])
 
-            self.log.info(self.log_msg("Running pg_dump command: {}".format(' '.join(command))))
-
             with open(self.stderr_file(database), "w+") as stderr:
                 start = time.time()
                 if self.encryption:
@@ -252,8 +250,6 @@ class PostgreSQLDumpWorker(Thread):
             database_backup_path = backups.build_database_backup_path(self.backup_id, database,
                                                                   self.namespace, self.external_backup_root)
 
-            self.log.info(self.log_msg("Running pg_dump command: {}".format(' '.join(command))))
-
             with open(database_backup_path, 'w+') as dump, \
                     open(self.stderr_file(database), "w+") as stderr:
                 start = time.time()
@@ -271,14 +267,8 @@ class PostgreSQLDumpWorker(Thread):
                     exit_code = pg_dump_proc.wait()
 
                 if exit_code != 0:
-
                     with open(self.stderr_file(database)) as f:
-                        stderr_contents = f.read()
-                        self.log.error("pg_dump stderr:\n{}".format(stderr_contents))
-                        raise backups.BackupFailedException(database, stderr_contents)
-
-                    #with open(self.stderr_file(database)) as f:
-                    #    raise backups.BackupFailedException(database, '\n'.join(f.readlines()))
+                        raise backups.BackupFailedException(database, '\n'.join(f.readlines()))
 
                 self.pg_dump_proc = None
         if self.s3:
