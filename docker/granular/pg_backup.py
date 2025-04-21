@@ -250,6 +250,7 @@ class PostgreSQLDumpWorker(Thread):
             database_backup_path = backups.build_database_backup_path(self.backup_id, database,
                                                                   self.namespace, self.external_backup_root)
 
+
             with open(database_backup_path, 'w+') as dump, \
                     open(self.stderr_file(database), "w+") as stderr:
                 start = time.time()
