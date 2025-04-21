@@ -271,8 +271,14 @@ class PostgreSQLDumpWorker(Thread):
                     exit_code = pg_dump_proc.wait()
 
                 if exit_code != 0:
+
                     with open(self.stderr_file(database)) as f:
-                        raise backups.BackupFailedException(database, '\n'.join(f.readlines()))
+                        stderr_contents = f.read()
+                        self.log.error("pg_dump stderr:\n{}".format(stderr_contents))
+                        raise backups.BackupFailedException(database, stderr_contents)
+
+                    #with open(self.stderr_file(database)) as f:
+                    #    raise backups.BackupFailedException(database, '\n'.join(f.readlines()))
 
                 self.pg_dump_proc = None
         if self.s3:
