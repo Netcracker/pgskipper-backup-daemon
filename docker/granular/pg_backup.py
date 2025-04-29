@@ -137,6 +137,38 @@ class PostgreSQLDumpWorker(Thread):
             if conn:
                 conn.close()
 
+#    def has_pg_hint_plan(self, database):
+#        connection_properties = configs.connection_properties()
+#        connection_properties['database'] = database
+#        conn = None
+#        try:
+#            conn = psycopg2.connect(**connection_properties)
+#            with conn.cursor() as cur:
+#                cur.execute("SELECT 1 FROM pg_extension WHERE extname = 'pg_hint_plan'")
+#                return cur.fetchone() is not None
+#        except Exception as e:
+#            raise backups.BackupFailedException(database, f"Failed to check pg_hint_plan presence: {e}")
+#        finally:
+#            if conn:
+#                conn.close()
+
+#    def get_included_extensions(self, database):
+#        connection_properties = configs.connection_properties()
+#        connection_properties['database'] = database
+#        conn = None
+#        try:
+#            conn = psycopg2.connect(**connection_properties)
+#            with conn.cursor() as cur:
+#                cur.execute("SELECT extname FROM pg_extension WHERE extname != 'pg_hint_plan'")
+#                included_extensions = [row[0] for row in cur]
+#                self.log.info(self.log_msg(f"Fetched included extensions for '{database}': {included_extensions}"))
+#                return included_extensions
+#        except Exception as e:
+#            raise backups.BackupFailedException(database, f"Failed to fetch included extensions: {e}")
+#        finally:
+#            if conn:
+#                conn.close()
+
     def get_included_extensions(self, database):
         connection_properties = configs.connection_properties()
         connection_properties['database'] = database
@@ -144,7 +176,13 @@ class PostgreSQLDumpWorker(Thread):
         try:
             conn = psycopg2.connect(**connection_properties)
             with conn.cursor() as cur:
-                cur.execute("SELECT extname FROM pg_extension WHERE extname != 'pg_hint_plan'")
+                # Get the excluded extensions from env
+                excluded_extensions = os.getenv("EXCLUDED_EXTENSIONS", "pg_hint_plan").split(',')
+                self.log.info(self.log_msg(f"Excluded extensions: {excluded_extensions}"))
+                # Prepare placeholders for query
+                placeholders = ','.join(['%s'] * len(excluded_extensions))
+                query = f"SELECT extname FROM pg_extension WHERE extname NOT IN ({placeholders})"
+                cur.execute(query, excluded_extensions)
                 included_extensions = [row[0] for row in cur]
                 self.log.info(self.log_msg(f"Fetched included extensions for '{database}': {included_extensions}"))
                 return included_extensions
