@@ -137,39 +137,6 @@ class PostgreSQLDumpWorker(Thread):
             if conn:
                 conn.close()
 
-
-#    def get_included_extensions(self, database):
-#        connection_properties = configs.connection_properties()
-#        connection_properties['database'] = database
-#        conn = None
-#        try:
-#            conn = psycopg2.connect(**connection_properties)
-#            with conn.cursor() as cur:
-#                # Get the excluded extensions from env (default to pg_hint_plan)
-#                excluded_env = os.getenv("EXCLUDED_EXTENSIONS")
-#                if not excluded_env:
-#                    excluded_extensions = ["pg_hint_plan"]
-#                else:
-#                    excluded_extensions = [e.strip() for e in excluded_env.split(',') if e.strip()]
-#
-#                self.log.info(self.log_msg(f"Excluded extensions: {excluded_extensions}"))
-#
-#                if not excluded_extensions:
-#                    self.log.warning(self.log_msg("No excluded extensions configured; all extensions will be included."))
-#
-#                # Prepare placeholders for query
-#                placeholders = ','.join(['%s'] * len(excluded_extensions))
-#                query = f"SELECT extname FROM pg_extension WHERE extname NOT IN ({placeholders})"
-#                cur.execute(query, excluded_extensions)
-#                included_extensions = [row[0] for row in cur]
-#                self.log.info(self.log_msg(f"Fetched included extensions for '{database}': {included_extensions}"))
-#                return included_extensions
-#        except Exception as e:
-#            raise backups.BackupFailedException(database, f"Failed to fetch included extensions: {e}")
-#        finally:
-#            if conn:
-#                conn.close()
-
     def get_included_extensions(self, database):
         connection_properties = configs.connection_properties()
         connection_properties['database'] = database
@@ -177,7 +144,6 @@ class PostgreSQLDumpWorker(Thread):
         try:
             conn = psycopg2.connect(**connection_properties)
             with conn.cursor() as cur:
-                # Read EXCLUDED_EXTENSIONS and always add 'pg_hint_plan'
                 excluded_env = os.getenv("EXCLUDED_EXTENSIONS", "")
                 excluded_extensions = [e.strip() for e in excluded_env.split(',') if e.strip()]
 
@@ -190,7 +156,6 @@ class PostgreSQLDumpWorker(Thread):
                 if not excluded_extensions:
                     self.log.warning(self.log_msg("No excluded extensions configured; all extensions will be included."))
 
-                # Prepare SQL query
                 placeholders = ','.join(['%s'] * len(excluded_extensions))
                 query = f"SELECT extname FROM pg_extension WHERE extname NOT IN ({placeholders})"
                 cur.execute(query, excluded_extensions)
@@ -260,7 +225,6 @@ class PostgreSQLDumpWorker(Thread):
             if self.compression_level or self.compression_level == 0:
                 command.extend(['-Z', str(self.compression_level)])
 
-            self.log.info(self.log_msg("Running pg_dump command: {}".format(' '.join(command))))
 
             with open(self.stderr_file(database), "w+") as stderr:
                 start = time.time()
@@ -303,7 +267,6 @@ class PostgreSQLDumpWorker(Thread):
             database_backup_path = backups.build_database_backup_path(self.backup_id, database,
                                                                   self.namespace, self.external_backup_root)
 
-            self.log.info(self.log_msg("Running pg_dump command: {}".format(' '.join(command))))
 
             with open(database_backup_path, 'w+') as dump, \
                     open(self.stderr_file(database), "w+") as stderr:
