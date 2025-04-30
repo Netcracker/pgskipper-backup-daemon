@@ -169,8 +169,6 @@ class PostgreSQLDumpWorker(Thread):
             if conn:
                 conn.close()
 
-
-
     def backup_single_database(self, database):
         self.log.info(self.log_msg("Start processing database '{}'.".format(database)))
         self.log.info(self.log_msg("Will use binaries: '{}' for backup.".format(self.bin_path)))
@@ -266,7 +264,6 @@ class PostgreSQLDumpWorker(Thread):
 
             database_backup_path = backups.build_database_backup_path(self.backup_id, database,
                                                                   self.namespace, self.external_backup_root)
-
 
             with open(database_backup_path, 'w+') as dump, \
                     open(self.stderr_file(database), "w+") as stderr:
