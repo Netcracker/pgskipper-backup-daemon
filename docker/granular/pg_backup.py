@@ -169,6 +169,30 @@ class PostgreSQLDumpWorker(Thread):
 #            if conn:
 #                conn.close()
 
+#    def get_included_extensions(self, database):
+#        connection_properties = configs.connection_properties()
+#        connection_properties['database'] = database
+#        conn = None
+#        try:
+#            conn = psycopg2.connect(**connection_properties)
+#            with conn.cursor() as cur:
+#                # Get the excluded extensions from env
+#                excluded_extensions = os.getenv("EXCLUDED_EXTENSIONS", "pg_hint_plan").split(',')
+#                self.log.info(self.log_msg(f"Excluded extensions: {excluded_extensions}"))
+#                # Prepare placeholders for query
+#                placeholders = ','.join(['%s'] * len(excluded_extensions))
+#                query = f"SELECT extname FROM pg_extension WHERE extname NOT IN ({placeholders})"
+#                cur.execute(query, excluded_extensions)
+#                included_extensions = [row[0] for row in cur]
+#                self.log.info(self.log_msg(f"Fetched included extensions for '{database}': {included_extensions}"))
+#                return included_extensions
+#        except Exception as e:
+#            raise backups.BackupFailedException(database, f"Failed to fetch included extensions: {e}")
+#        finally:
+#            if conn:
+#                conn.close()
+
+
     def get_included_extensions(self, database):
         connection_properties = configs.connection_properties()
         connection_properties['database'] = database
@@ -176,9 +200,18 @@ class PostgreSQLDumpWorker(Thread):
         try:
             conn = psycopg2.connect(**connection_properties)
             with conn.cursor() as cur:
-                # Get the excluded extensions from env
-                excluded_extensions = os.getenv("EXCLUDED_EXTENSIONS", "pg_hint_plan").split(',')
+                # Get the excluded extensions from env (default to pg_hint_plan)
+                excluded_env = os.getenv("EXCLUDED_EXTENSIONS")
+                if not excluded_env:
+                    excluded_extensions = ["pg_hint_plan"]
+                else:
+                    excluded_extensions = [e.strip() for e in excluded_env.split(',') if e.strip()]
+
                 self.log.info(self.log_msg(f"Excluded extensions: {excluded_extensions}"))
+
+                if not excluded_extensions:
+                    self.log.warning(self.log_msg("No excluded extensions configured; all extensions will be included."))
+
                 # Prepare placeholders for query
                 placeholders = ','.join(['%s'] * len(excluded_extensions))
                 query = f"SELECT extname FROM pg_extension WHERE extname NOT IN ({placeholders})"
