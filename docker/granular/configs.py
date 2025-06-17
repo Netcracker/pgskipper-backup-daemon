@@ -55,8 +55,10 @@ def backups_storage(version=None):
         storage_path = '/backup-storage/pg14/granular'
     elif [15, 0] <= version < [16, 0]:
         storage_path = '/backup-storage/pg15/granular'
-    elif version >= [16, 0]:
+    elif [16, 0] <= version < [17, 0]:
         storage_path = '/backup-storage/pg16/granular'
+    elif version >= [17, 0]:
+        storage_path = '/backup-storage/pg17/granular'
     return storage_path
 
 
