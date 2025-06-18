@@ -174,6 +174,8 @@ def get_pgsql_bin_path(version):
         return "/usr/lib/postgresql/15/bin"
     elif major_version == 16:
         return "/usr/lib/postgresql/16/bin"
+    elif major_version == 17:
+        return "/usr/lib/postgresql/17/bin"
 
 
 def is_external_pg():
