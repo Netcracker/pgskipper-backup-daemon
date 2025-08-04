@@ -40,7 +40,7 @@ skip_tls_verify = os.getenv("OC_SKIP_TLS_VERIFY", "true")
 oc_openshift_url = os.getenv("OC_OPENSHIFT_URL", None)
 oc_project = os.getenv("POD_NAMESPACE", None)
 pg_cluster_name = os.getenv("PG_CLUSTER_NAME", None)
-exec_timeout = int(os.getenv("OC_EXEC_TIMEOUT", "1800"))
+exec_timeout = int(os.getenv("OC_EXEC_TIMEOUT", "3600"))
 
 pg_dir = "/var/lib/pgsql/data"
 pg_data_dir = "{}/postgresql_${{POD_IDENTITY}}".format(pg_dir)
@@ -195,34 +195,11 @@ class PgBackRestRecovery():
         stateful_sets =  self.get_patroni_statefulsets()
 
         if replicas_only:
-            log.info("Restoring replicas only")
-            master_pods = self.find_cluster_pods("master", 1)
-            # Extract stateful set name from master pod name (remove "-0" suffix)
-            master_statefulset_name = master_pods[0].metadata.name.rsplit("-", 1)[0]
-            replicas_stateful_sets = []
-            for stateful_set in stateful_sets:
-                if stateful_set.metadata.name != master_statefulset_name:
-                    replicas_stateful_sets.append(stateful_set)
-            self.restore_replicas(replicas_stateful_sets)
-            log.info("Replicas have been restored")
-            return
+            return self.restore_replicas_only(stateful_sets)
 
         for stateful_set in stateful_sets:
-
-            stateful_set_name = stateful_set.metadata.name
-            pod_name = stateful_set.metadata.name + "-0"
-
-            cmd = ["sh", "-c", "while true ; do sleep 3600; done"]
-
-            self.patch_statefulset_cmd(stateful_set, stateful_set_name, cmd)
-            time.sleep(5)
-            #Just in case when pods could be scaled 0
-            self.scale_statefulset(stateful_set_name,1)
-            if not self.wait_for_pod(pod_name, attempts=5):
-                raise Exception("Pod {} is not ready".format(pod_name))
-            self.cleanup_patroni_data(pod_name, stateful_set_name, False)
+            self.cleanup_data_for_stateful_set(stateful_set)
             time.sleep(15)
-
 
         stateful_sets =  self.get_patroni_statefulsets()
 
@@ -273,6 +250,46 @@ class PgBackRestRecovery():
 
         log.info("All pods have been restored")
         log.info("Done")
+
+    def restore_replicas_only(self, stateful_sets):
+        log.info("Restoring replicas only")
+        master_pods = self.find_cluster_pods("master", 1)
+        # Extract stateful set name from master pod name (remove "-0" suffix)
+        master_statefulset_name = master_pods[0].metadata.name.rsplit("-", 1)[0]
+        log.info(f"Master stateful set name: {master_statefulset_name}")
+        
+        # Clean up non-master stateful sets
+        for stateful_set in stateful_sets:
+            if stateful_set.metadata.name != master_statefulset_name:
+                self.cleanup_data_for_stateful_set(stateful_set)
+                time.sleep(15)
+        
+        # Filter replicas after getting fresh state
+        stateful_sets = self.get_patroni_statefulsets()
+        replicas_stateful_sets = [
+            stateful_set for stateful_set in stateful_sets 
+            if stateful_set.metadata.name != master_statefulset_name
+        ]
+        
+        if replicas_stateful_sets:
+            self.restore_replicas(replicas_stateful_sets)
+            log.info("Replicas have been restored")
+        else:
+            log.info("No replicas to restore")
+        return
+
+    def cleanup_data_for_stateful_set(self, stateful_set):
+        stateful_set_name = stateful_set.metadata.name
+        pod_name = stateful_set.metadata.name + "-0"
+
+        cmd = ["sh", "-c", "while true ; do sleep 3600; done"]
+        self.patch_statefulset_cmd(stateful_set, stateful_set_name, cmd)
+        time.sleep(5)
+        # Just in case when pods could be scaled 0
+        self.scale_statefulset(stateful_set_name,1)
+        if not self.wait_for_pod(pod_name, attempts=5):
+            raise Exception("Pod {} is not ready".format(pod_name))
+        self.cleanup_patroni_data(pod_name, stateful_set_name, False)
 
     def restore_replicas(self, stateful_sets):
         # Trigger incremental backup
@@ -346,10 +363,10 @@ class PgBackRestRecovery():
         if preserve_old_files == "yes":
             self.oc_client.oc_exec(pod_name, container_name, "sh -c 'mv {} {}_backup_$(date +%s); ls -ll {}'".format(pg_data_dir, pg_data_dir, pg_dir))
             log.info("Old files were preserved on volume. Cleanup if needed.")
-        self.oc_exec(pod_name, container_name, " sh -c 'rm -rf {}; mkdir {}; chmod 700 {}' ".format(pg_data_dir, pg_data_dir, pg_data_dir))
+        self.oc_exec(pod_name, container_name, "sh -c 'rm -rf {}; mkdir {}; chmod 700 {}'; echo Done".format(pg_data_dir, pg_data_dir, pg_data_dir))
 
 
-    @retry(tries=30, delay=5)
+    @retry(tries=3600, delay=5)
     def oc_exec(self, pod_id, container_name, command):
         log.debug(f"Try to execute '{command}' on pod {pod_id}")
         core_api = client.CoreV1Api(self._api_client)
