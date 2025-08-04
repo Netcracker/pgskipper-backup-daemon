@@ -160,7 +160,7 @@ class PgBackRestRecovery():
     def upgrade_stanza(self):
         # wait for leader to upgrade stanza
         logging.basicConfig(level=logging.DEBUG)
-        r = requests.post("http://pgbackrest:3000/upgrade")
+        r = requests.post("http://backrest:3000/upgrade")
         log.info(f'{r.status_code}, {r.text}')
         
         # Raise exception for status codes that should trigger retry
