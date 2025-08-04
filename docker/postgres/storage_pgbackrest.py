@@ -47,8 +47,9 @@ class BackRestStorage(storage.Storage):
         print(response)
         vault = []
         for backup in response:
-            if backup.get('annotation', {}).get('timestamp'):
-                vault.append(BackRestVault(backup['annotation']['timestamp']))
+            annotation = backup.get('annotation') or {}
+            if annotation.get('timestamp'):
+                vault.append(BackRestVault(annotation['timestamp']))
             else:
                 self.__log.warning("Found backup without timestamp in annotation: %s", backup)
         return vault
