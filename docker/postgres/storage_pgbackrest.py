@@ -43,7 +43,7 @@ class BackRestStorage(storage.Storage):
 
     def list(self):
 
-        response = requests.get("http://pgbackrest:3000/list").json()
+        response = requests.get("http://backrest-headless:3000/list").json()
         print(response)
         vault = [BackRestVault(backup['annotation']['timestamp']) for backup in response]
         return vault
