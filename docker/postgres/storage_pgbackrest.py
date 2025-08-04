@@ -45,7 +45,12 @@ class BackRestStorage(storage.Storage):
 
         response = requests.get("http://backrest-headless:3000/list").json()
         print(response)
-        vault = [BackRestVault(backup['annotation']['timestamp']) for backup in response]
+        vault = []
+        for backup in response:
+            if backup.get('annotation', {}).get('timestamp'):
+                vault.append(BackRestVault(backup['annotation']['timestamp']))
+            else:
+                self.__log.warning("Found backup without timestamp in annotation: %s", backup)
         return vault
 
     def size(self):

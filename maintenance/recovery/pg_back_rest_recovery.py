@@ -319,8 +319,8 @@ class PgBackRestRecovery():
             list_response.raise_for_status()
             backups = list_response.json()
                 
-            if any(backup['annotation']['timestamp'] == backup_id for backup in backups):
-                    log.info(f"Backup {backup_id} found in list")
+            if any(backup.get('annotation', {}).get('timestamp') == backup_id for backup in backups):
+                log.info(f"Backup {backup_id} found in list")
             else:
                 log.info(f"Backup {backup_id} not found in list")
                 raise Exception(f"Backup {backup_id} not found in list")
