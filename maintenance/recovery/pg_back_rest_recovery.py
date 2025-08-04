@@ -132,13 +132,13 @@ class PgBackRestRecovery():
             template_cm = self.get_config_map(f"{pg_cluster_name}-patroni.config.yaml")
         return template_cm
 
-    def create_custom_bootstrap_method(self, target, restore_type):
+    def create_custom_bootstrap_method(self, target, restore_type, target_timeline):
         template_cm = self.get_template_cm()
         patroni_config_data = template_cm.data['patroni-config-template.yaml']
         log.info(f"Data {patroni_config_data}")
         dict_data = yaml.load(patroni_config_data,Loader=yaml.FullLoader)
         dict_data["bootstrap"]["pgbackrest"] = {
-            "command": f"pgbackrest --stanza=patroni --delta --type={restore_type} --target='{target}' --target-action=promote restore",
+            "command": f"pgbackrest --stanza=patroni --delta --type={restore_type} --target='{target}' --target-timeline={target_timeline} --target-action=promote restore",
             "keep_existing_recovery_conf": "True",
             "no_params": "True"
         }
@@ -188,6 +188,7 @@ class PgBackRestRecovery():
         backup_id = '' if not os.getenv("SET") else os.getenv("SET")
         restore_type = '' if not os.getenv("TYPE") else os.getenv("TYPE")
         target = '' if not os.getenv("TARGET") else os.getenv("TARGET")
+        target_timeline = 'current' if not os.getenv("TARGET_TIMELINE") else os.getenv("TARGET_TIMELINE")
         replicas_only_env = False if not os.getenv("REPLICAS_ONLY") else os.getenv("REPLICAS_ONLY")
         replicas_only = replicas_only_env and replicas_only_env.lower() in ['true', '1', 'yes']
 
@@ -214,7 +215,7 @@ class PgBackRestRecovery():
         # Create custom bootstrap method if target is provided
         if target:
             log.info(f"Target has been provided, so starting PITR for pod {pod_name}")
-            self.create_custom_bootstrap_method(target, restore_type)
+            self.create_custom_bootstrap_method(target, restore_type, target_timeline)
         else:
             log.info(f"Starting full restore procedure for pod {pod_name}")
             http_codes[stateful_set_name] = self.restore_pod(pod_name, backup_id)
@@ -293,10 +294,10 @@ class PgBackRestRecovery():
 
     def restore_replicas(self, stateful_sets):
         # Trigger incremental backup
-        incr_backup_id = self.trigger_incr_backup()
+        incr_backup_id = self.trigger_diff_backup()
 
         # Wait for backup to appear in list
-        self.find_incr_backup_pod(incr_backup_id)
+        self.wait_diff_backup(incr_backup_id)
         
         for stateful_set in stateful_sets:
             stateful_set_name = stateful_set.metadata.name
@@ -316,20 +317,20 @@ class PgBackRestRecovery():
             raise
 
     @retry(tries=3600, delay=5)
-    def trigger_incr_backup(self):  
-        log.info("Triggering incremental backup")
+    def trigger_diff_backup(self):  
+        log.info("Triggering differential backup")
         try:
-            backup_response = requests.post("http://localhost:9000/backup/incr")
+            backup_response = requests.post("http://localhost:9000/backup/diff")
             backup_response.raise_for_status()
             backup_id = backup_response.json()['backupId']
-            log.info(f"Incremental backup triggered with ID: {backup_id}")
+            log.info(f"Differential backup triggered with ID: {backup_id}")
             return backup_id
         except requests.exceptions.RequestException as e:
-            log.error(f"Failed to trigger incremental backup: {e}")
+            log.error(f"Failed to trigger differential backup: {e}")
             raise
 
     @retry(tries=3600, delay=5)
-    def find_incr_backup_pod(self, backup_id):
+    def wait_diff_backup(self, backup_id):
         log.info(f"Waiting for backup {backup_id} to appear in list")
         try:
             list_response = requests.get("http://backrest-headless:3000/list")
@@ -363,7 +364,7 @@ class PgBackRestRecovery():
         if preserve_old_files == "yes":
             self.oc_client.oc_exec(pod_name, container_name, "sh -c 'mv {} {}_backup_$(date +%s); ls -ll {}'".format(pg_data_dir, pg_data_dir, pg_dir))
             log.info("Old files were preserved on volume. Cleanup if needed.")
-        self.oc_exec(pod_name, container_name, "sh -c 'rm -rf {}; mkdir {}; chmod 700 {}'; echo Done".format(pg_data_dir, pg_data_dir, pg_data_dir))
+        self.oc_exec(pod_name, container_name, "sh -c 'rm -rf {}; rm -rf {}/pgbackrest; mkdir {}; chmod 700 {}'; echo Done".format(pg_data_dir, pg_dir, pg_data_dir, pg_data_dir))
 
 
     @retry(tries=3600, delay=5)
