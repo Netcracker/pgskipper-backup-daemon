@@ -20,8 +20,6 @@ import configs
 import endpoints.backup
 import endpoints.restore
 import endpoints.status
-import endpoints.new_backup
-import endpoints.new_restore
 import storage
 
 from opentelemetry.instrumentation.flask import FlaskInstrumentor
