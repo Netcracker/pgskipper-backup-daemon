@@ -57,12 +57,6 @@ api.add_resource(endpoints.status.Health, *endpoints.status.Health.get_endpoints
 api.add_resource(endpoints.status.BackupStatus, *endpoints.status.BackupStatus.get_endpoints(), resource_class_args=(storage_instance,))
 api.add_resource(endpoints.status.ExternalRestoreStatus, *endpoints.status.ExternalRestoreStatus.get_endpoints(), resource_class_args=(storage_instance,))
 api.add_resource(endpoints.restore.ExternalRestoreRequest, *endpoints.restore.ExternalRestoreRequest.get_endpoints(), resource_class_args=(storage_instance,))
-api.add_resource(endpoints.new_backup.NewBackup,        *endpoints.new_backup.NewBackup.get_endpoints())
-api.add_resource(endpoints.new_backup.NewBackupStatus,  *endpoints.new_backup.NewBackupStatus.get_endpoints())
-api.add_resource(endpoints.new_backup.NewBackupDelete,  *endpoints.new_backup.NewBackupDelete.get_endpoints())
-api.add_resource(endpoints.new_restore.NewRestore,       *endpoints.new_restore.NewRestore.get_endpoints())
-api.add_resource(endpoints.new_restore.NewRestoreStatus, *endpoints.new_restore.NewRestoreStatus.get_endpoints())
-api.add_resource(endpoints.new_restore.NewRestoreDelete, *endpoints.new_restore.NewRestoreDelete.get_endpoints())
 
 if __name__ == '__main__':
     app.run()
