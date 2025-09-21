@@ -1105,28 +1105,27 @@ class NewBackupStatus(flask_restful.Resource):
         if not backups.is_valid_namespace(namespace):
             return "Invalid namespace name: %s." % namespace.encode("utf-8"), http.client.BAD_REQUEST
 
-        external_backup_path = request.args.get("blobPath") or None
-        external_backup_root = None
-        if external_backup_path is not None:
-            external_backup_root = backups.build_external_backup_root(external_backup_path)
+        external_backup_path = request.args.get("blobPath")
+        external_backup_root = backups.build_external_backup_root(external_backup_path) if external_backup_path else None
 
         status_path = backups.build_backup_status_file_path(backup_id, namespace, external_backup_root)
 
         if self.s3:
             try:
-                status = self.s3.read_object(status_path)
-                return json.loads(status), http.client.OK
+                raw = json.loads(self.s3.read_object(status_path))
             except Exception:
                 return "Backup in bucket is not found.", http.client.NOT_FOUND
         else:
             if not os.path.isfile(status_path):
                 return "Backup is not found.", http.client.NOT_FOUND
-            return utils.get_json_by_path(status_path), http.client.OK
-    
+            with open(status_path) as f:
+                raw = json.load(f)
+
+        return backups.transform_backup_status_v1(raw), http.client.OK
+
     @auth.login_required
     @superuser_authorization
     def delete(self, backup_id):
-        # re-use existing delete logic (same behavior/shape as old API)
         return GranularBackupDeleteEndpoint().process_delete(backup_id)
 
 
@@ -1252,7 +1251,7 @@ class NewRestoreStatus(flask_restful.Resource):
     @superuser_authorization
     def get(self, restore_id):
         if not restore_id:
-            return http.client.BAD_REQUEST, "Restore tracking ID is not specified."
+            return "Restore tracking ID is not specified.", http.client.BAD_REQUEST
 
         try:
             backup_id, namespace = backups.extract_backup_id_from_tracking_id(restore_id)
@@ -1263,25 +1262,26 @@ class NewRestoreStatus(flask_restful.Resource):
         if not backups.is_valid_namespace(namespace):
             return "Invalid namespace name: %s." % namespace.encode("utf-8"), http.client.BAD_REQUEST
 
-        external_backup_path = request.args.get("blobPath") or None
+        external_backup_path = request.args.get("blobPath")
         external_backup_root = backups.build_external_backup_root(external_backup_path) if external_backup_path else None
         status_path = backups.build_restore_status_file_path(backup_id, restore_id, namespace, external_backup_root)
 
         if self.s3:
             try:
-                status = self.s3.read_object(status_path)
-                return json.loads(status), http.client.OK
+                raw = json.loads(self.s3.read_object(status_path))
             except Exception:
                 return "Backup in bucket is not found.", http.client.NOT_FOUND
         else:
             if not os.path.isfile(status_path):
                 return "Restore is not found.", http.client.NOT_FOUND
-            return utils.get_json_by_path(status_path), http.client.OK
-    
+            with open(status_path) as f:
+                raw = json.load(f)
+
+        return backups.transform_restore_status_v1(raw), http.client.OK
+
     @auth.login_required
     @superuser_authorization
     def delete(self, restore_id):
-        # terminate the restore worker; reuse old endpoint logic
         return TerminateRestoreEndpoint().post(restore_id)
 
 def get_pgbackrest_service():
