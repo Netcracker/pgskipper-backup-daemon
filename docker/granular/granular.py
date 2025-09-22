@@ -1123,11 +1123,6 @@ class NewBackupStatus(flask_restful.Resource):
 
         return backups.transform_backup_status_v1(raw), http.client.OK
 
-    @auth.login_required
-    @superuser_authorization
-    def delete(self, backup_id):
-        return GranularBackupDeleteEndpoint().process_delete(backup_id)
-
 
 class NewRestore(flask_restful.Resource):
     __endpoints = ["/api/v1/restore/<backup_id>"]
@@ -1279,11 +1274,107 @@ class NewRestoreStatus(flask_restful.Resource):
 
         return backups.transform_restore_status_v1(raw), http.client.OK
 
+
+class NewBackupDelete(flask_restful.Resource):
+    __endpoints = ["/api/v1/backup/<backup_id>"]
+
+    def __init__(self):
+        self.log = logging.getLogger("NewBackupDelete")
+        self.s3 = storage_s3.AwsS3Vault() if os.environ.get("STORAGE_TYPE") == "s3" else None
+
+    @staticmethod
+    def get_endpoints():
+        return NewBackupDelete.__endpoints
+
+    @auth.login_required
+    @superuser_authorization
+    def delete(self, backup_id):
+        if not backup_id:
+            return {"backupId": backup_id, "message": "Backup ID is not specified", "status": "Failed"}, http.client.BAD_REQUEST
+
+        namespace = request.args.get("namespace") or configs.default_namespace()
+        if not backups.is_valid_namespace(namespace):
+            return {"backupId": backup_id, "message": f"Invalid namespace name: {namespace}", "status": "Failed"}, http.client.BAD_REQUEST
+
+        external_backup_path = request.args.get("blobPath") or request.args.get("externalBackupPath")
+        external_backup_root = backups.build_external_backup_root(external_backup_path) if external_backup_path else None
+
+        def _exists(p: str) -> bool:
+            if self.s3:
+                try:
+                    return self.s3.is_file_exists(p)
+                except Exception:
+                    return False
+            return os.path.isfile(p)
+
+        status_path = backups.build_backup_status_file_path(backup_id, namespace, external_backup_root)
+        if not _exists(status_path):
+            if external_backup_root is None and not self.s3:
+                base = os.getenv("EXTERNAL_STORAGE_ROOT")
+                if base:
+                    candidate = os.path.join(base, namespace, backup_id, "status.json")
+                    if os.path.isfile(candidate):
+                        external_backup_root = base
+                        status_path = backups.build_backup_status_file_path(backup_id, namespace, external_backup_root)
+
+        if not _exists(status_path):
+            return {"backupId": backup_id,
+                    "message": "Backup is not found. If this backup is in external storage, pass ?blobPath=<prefix>.",
+                    "status": "Failed"}, http.client.NOT_FOUND
+
+        try:
+            target_dir = backups.build_backup_path(backup_id, namespace, external_backup_root)
+            if self.s3:
+                self.s3.delete_objects(target_dir)
+            else:
+                TerminateBackupEndpoint().post(backup_id)
+                shutil.rmtree(target_dir, ignore_errors=False)
+
+                if external_backup_root is None:
+                    ns_dir = backups.build_namespace_path(namespace)
+                    if os.path.isdir(ns_dir) and not os.listdir(ns_dir) and namespace != "default":
+                        shutil.rmtree(ns_dir, ignore_errors=True)
+
+        except Exception as e:
+            self.log.exception("Delete failed for %s: %s", backup_id, e)
+            return {"backupId": backup_id,
+                    "message": f"An error occurred while deleting backup: {e}",
+                    "status": "Failed"}, http.client.INTERNAL_SERVER_ERROR
+
+        return {"backupId": backup_id, "message": "Backup deleted successfully.", "status": "Successful"}, http.client.OK
+
+
+class NewRestoreDelete(flask_restful.Resource):
+    __endpoints = ["/api/v1/restore/<restore_id>"]
+
+    def __init__(self):
+        self.log = logging.getLogger("NewRestoreDelete")
+
+    @staticmethod
+    def get_endpoints():
+        return NewRestoreDelete.__endpoints
+
     @auth.login_required
     @superuser_authorization
     def delete(self, restore_id):
-        return TerminateRestoreEndpoint().post(restore_id)
+        if not restore_id:
+            return {"restoreId": restore_id, "message": "Restore ID is not specified", "status": "Failed"}, http.client.BAD_REQUEST
 
+        resp = TerminateRestoreEndpoint().post(restore_id)
+        code = getattr(resp, "status_code", None)
+        if code == 404:
+            return {"restoreId": restore_id,
+                    "message": "No active restore (already finished or not found).",
+                    "status": "Successful"}, http.client.OK
+        if code and 200 <= code < 300:
+            return {"restoreId": restore_id,
+                    "message": "Restore terminated successfully.",
+                    "status": "Successful"}, http.client.OK
+        return {"restoreId": restore_id,
+                "message": "Failed to terminate restore.",
+                "status": "Failed"}, http.client.INTERNAL_SERVER_ERROR
+    
+    
 def get_pgbackrest_service():
     if os.getenv("BACKUP_FROM_STANDBY") == "true":
         try:
@@ -1339,6 +1430,8 @@ api.add_resource(NewBackup, *NewBackup.get_endpoints())
 api.add_resource(NewBackupStatus, *NewBackupStatus.get_endpoints())
 api.add_resource(NewRestore, *NewRestore.get_endpoints())
 api.add_resource(NewRestoreStatus, *NewRestoreStatus.get_endpoints())
+api.add_resource(NewBackupDelete, "/api/v1/backup/<backup_id>")
+api.add_resource(NewRestoreDelete, "/api/v1/restore/<restore_id>")
 
 scheduler = BackgroundScheduler()
 scheduler.start()
