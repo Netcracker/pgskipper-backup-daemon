@@ -68,6 +68,7 @@ class PostgreSQLDumpWorker(Thread):
         }
         self.pg_dump_proc = None
 
+        self._init_s3_from_external()
         self.flush_status(self.external_backup_root)
 
     def cancel(self):
@@ -566,4 +567,24 @@ class PostgreSQLDumpWorker(Thread):
 
     def get_pg_version_from_dump(self, database_backup_path):
         return utils.get_pg_version_from_dump(database_backup_path, self.key_name if self.encryption else None, self.bin_path)
+    
+    def _init_s3_from_external(self):
+        if not self.s3:
+            return
+
+        root = self.external_backup_root
+        if root and isinstance(root, str) and root.startswith("s3://"):
+            rest = root[5:]             
+            bucket, _, prefix = rest.partition("/")
+            if bucket:
+                self.s3.bucket = bucket
+            self.s3.aws_prefix = (prefix.rstrip("/") if prefix else "")
+            return
+        
+        b = os.getenv("AWS_S3_BUCKET") or os.getenv("S3_BUCKET")
+        p = os.getenv("AWS_S3_PREFIX") or os.getenv("S3_PREFIX")
+        if b:
+            self.s3.bucket = b
+        if p is not None:
+            self.s3.aws_prefix = p.rstrip("/")
 
