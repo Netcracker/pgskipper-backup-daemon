@@ -1060,7 +1060,7 @@ class NewBackup(flask_restful.Resource):
 
     def __init__(self):
         self.log = logging.getLogger("NewBackup")
-        self.allowed_fields = ["storageName", "blobPath", "databases"]
+        self.allowed_fields = ["storageName", "blobPath", "databases", "sanitizeKeys"]
 
     @staticmethod
     def get_endpoints():
@@ -1070,6 +1070,7 @@ class NewBackup(flask_restful.Resource):
     def post(self):
         body = request.get_json(silent=True) or {}
         blob_path = body.get("blobPath")
+        sanitize_keys = bool(body.get("sanitizeKeys", True))
         databases = body.get("databases") or []
 
         if not blob_path:
@@ -1081,6 +1082,7 @@ class NewBackup(flask_restful.Resource):
         backup_request = {
             "databases": list(databases),
             "externalBackupPath": blob_path,
+            "sanitizeKeys": sanitize_keys,
         }
         return GranularBackupRequestEndpoint().perform_granular_backup(backup_request)
 
