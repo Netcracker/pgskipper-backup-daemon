@@ -1132,6 +1132,10 @@ class NewBackupStatus(flask_restful.Resource):
 
         req_ns  = request.args.get("namespace")
         external_backup_path = request.args.get("blobPath") or request.args.get("externalBackupPath")
+        if not external_backup_path:
+            return {"backupId": backup_id,
+                    "message": "blobPath query parameter is required (e.g. ?blobPath=tmp/a/b/c).",
+                    "status": "Failed"}, http.client.BAD_REQUEST
         external_backup_root = backups.build_external_backup_root(external_backup_path) if external_backup_path else None
 
         def _exists(p: str) -> bool:
@@ -1365,6 +1369,10 @@ class NewRestoreStatus(flask_restful.Resource):
                     "status": "Successful"}, http.client.OK
 
         external_backup_path = request.args.get("blobPath") or request.args.get("externalBackupPath")
+        if not external_backup_path:
+            return {"restoreId": restore_id,
+                    "message": "blobPath query parameter is required for cleanup (e.g. ?blobPath=tmp/a/b/c).",
+                    "status": "Failed"}, http.client.BAD_REQUEST
         external_backup_root = backups.build_external_backup_root(external_backup_path) if external_backup_path else None
 
         status_path = backups.build_restore_status_file_path(backup_id, restore_id, namespace, external_backup_root)
