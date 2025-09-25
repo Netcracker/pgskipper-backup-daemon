@@ -29,6 +29,7 @@ import configs
 import pg_backup
 import pg_restore
 import utils
+import glob
 import storage_s3
 import psycopg2
 import threading
@@ -1368,16 +1369,28 @@ class NewRestoreStatus(flask_restful.Resource):
 
         status_path = backups.build_restore_status_file_path(backup_id, restore_id, namespace, external_backup_root)
 
-        restore_dir = os.path.dirname(status_path)
+        # restore_dir = os.path.dirname(status_path)
+        backup_base = backups.build_backup_path(backup_id, namespace, external_backup_root)
+        pattern_name = f"{restore_id}"
+        pattern_glob = os.path.join(backup_base, pattern_name + "*")
 
         try:
             if self.s3:
-                self.s3.delete_objects(restore_dir + ("" if restore_dir.endswith("/") else "/"))
+                prefix = os.path.join(backup_base, pattern_name).rstrip("/") + ""
+                if not prefix.startswith(backup_base):
+                    return {"restoreId": restore_id,
+                            "message": "Unsafe restore prefix; refusing to delete.",
+                            "status": "Failed"}, http.client.BAD_REQUEST
+                self.s3.delete_objects(prefix if prefix.endswith("/") else prefix)
             else:
+                for p in glob.glob(pattern_glob):
+                    if os.path.isfile(p):
+                        os.remove(p)
                 if os.path.isfile(status_path):
-                    os.remove(status_path)
-                if os.path.isdir(restore_dir):
-                    shutil.rmtree(restore_dir, ignore_errors=True)
+                    try:
+                        os.remove(status_path)
+                    except FileNotFoundError:
+                        pass
         except Exception as e:
             self.log.exception("Restore cleanup failed for %s: %s", restore_id, e)
             return {"restoreId": restore_id,
