@@ -52,15 +52,7 @@ class PostgreSQLDumpWorker(Thread):
         self.databases = databases if databases else []
         self.backup_dir = backups.build_backup_path(self.backup_id, self.namespace, self.external_backup_root)
         self.create_backup_dir()
-        if os.environ['STORAGE_TYPE'] == "s3":
-            try:
-                sanitize_keys = bool(backup_request.get('sanitizeKeys', False))
-                self.s3 = storage_s3.AwsS3Vault(sanitize_keys=sanitize_keys)
-            except ValueError as e:
-                self.log.error(self.log_msg(str(e)))
-                raise
-        else:
-            self.s3 = None
+        self.s3 = storage_s3.AwsS3Vault() if os.environ['STORAGE_TYPE'] == "s3" else None
         self._cancel_event = Event()
         if configs.get_encryption():
             self.encryption = True
