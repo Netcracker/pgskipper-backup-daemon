@@ -1070,6 +1070,7 @@ class NewBackup(flask_restful.Resource):
     @auth.login_required
     def post(self):
         body = request.get_json(silent=True) or {}
+        storage_name = body.get("storageName")
         blob_path = body.get("blobPath")
         databases = body.get("databases") or []
 
@@ -1108,6 +1109,7 @@ class NewBackupStatus(flask_restful.Resource):
 
         external_backup_path = request.args.get("blobPath")
         external_backup_root = backups.build_external_backup_root(external_backup_path) if external_backup_path else None
+        storage_name = request.args.get("storageName") or os.environ.get("STORAGE_NAME")
 
         status_path = backups.build_backup_status_file_path(backup_id, namespace, external_backup_root)
 
@@ -1121,6 +1123,11 @@ class NewBackupStatus(flask_restful.Resource):
                 return "Backup is not found.", http.client.NOT_FOUND
             with open(status_path) as f:
                 raw = json.load(f)
+
+        if external_backup_path and not (raw.get("blobPath") or raw.get("externalBackupPath")):
+            raw["blobPath"] = external_backup_path
+        if storage_name and not raw.get("storageName"):
+            raw["storageName"] = storage_name
 
         return backups.transform_backup_status_v1(raw), http.client.OK
     
@@ -1344,6 +1351,7 @@ class NewRestoreStatus(flask_restful.Resource):
 
         external_backup_path = request.args.get("blobPath")
         external_backup_root = backups.build_external_backup_root(external_backup_path) if external_backup_path else None
+        storage_name = request.args.get("storageName") or os.environ.get("STORAGE_NAME")
         status_path = backups.build_restore_status_file_path(backup_id, restore_id, namespace, external_backup_root)
 
         if self.s3:
@@ -1356,6 +1364,11 @@ class NewRestoreStatus(flask_restful.Resource):
                 return "Restore is not found.", http.client.NOT_FOUND
             with open(status_path) as f:
                 raw = json.load(f)
+                
+        if external_backup_path and not (raw.get("blobPath") or raw.get("externalBackupPath")):
+            raw["blobPath"] = external_backup_path
+        if storage_name and not raw.get("storageName"):
+            raw["storageName"] = storage_name
 
         return backups.transform_restore_status_v1(raw), http.client.OK
     
