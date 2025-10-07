@@ -1164,8 +1164,6 @@ class NewBackupStatus(flask_restful.Resource):
 
         if external_backup_path and not (raw.get("blobPath") or raw.get("externalBackupPath")):
             raw["blobPath"] = external_backup_path
-        if storage_name and not raw.get("storageName"):
-            raw["storageName"] = storage_name
 
         return backups.transform_backup_status_v1(raw), http.client.OK
     
