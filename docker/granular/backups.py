@@ -414,6 +414,29 @@ def sweep_by_policy():
 
     log.info("Backups sweeping finished.")
 
+def extract_status(resp):
+    if hasattr(resp, "status_code"):
+        try:
+            body = resp.get_json(silent=True)
+        except Exception:
+            body = None
+        if body is None:
+            try:
+                body = resp.get_data(as_text=True)
+            except Exception:
+                body = None
+        return body, int(resp.status_code), None
+
+    if isinstance(resp, tuple):
+        if len(resp) == 2:
+            body, code = resp
+            return body, int(code), None
+        if len(resp) == 3:
+            body, code, headers = resp
+            return body, int(code), headers
+
+    return None, None, None
+
 def _parse_bytes(v):
     if v is None:
         return None
@@ -459,21 +482,29 @@ def _parse_bytes(v):
 def transform_backup_status_v1(raw: dict) -> dict:
     raw = raw or {}
     dbs = raw.get("databases") or {}
+
+    storage_name = raw.get("storageName") or raw.get("storage") or raw.get("storage_name") or ""
+    blob_path = raw.get("blobPath") or raw.get("externalBackupPath") or raw.get("blob_path") or ""
+    creation = raw.get("created") or raw.get("creationTime") or raw.get("creation") or raw.get("timestamp") or raw.get("startTime")
+    completion = raw.get("completed") or raw.get("completionTime") or raw.get("completedTime")
+
     return {
-        "status": raw.get("status"), 
+        "status": raw.get("status"),
         "errorMessage": raw.get("errorMessage") or raw.get("error"),
         "backupId": raw.get("backupId"),
-        "creationTime": raw.get("created"),
-        "completionTime": raw.get("completed") or raw.get("completionTime"),
+        "storageName": storage_name,
+        "blobPath": blob_path,
+        "creationTime": creation,
+        "completionTime": completion,
         "databases": [
             {
                 "databaseName": name,
                 "status": (info or {}).get("status"),
-                "size": _parse_bytes(info.get("size")),
+                "size": _parse_bytes((info or {}).get("size") or (info or {}).get("sizeBytes")),
                 "duration": (info or {}).get("duration"),
                 "path": (info or {}).get("path"),
                 "errorMessage": (info or {}).get("errorMessage") or (info or {}).get("error"),
-                "creationTime": (info or {}).get("created") or raw.get("created"),
+                "creationTime": (info or {}).get("created") or (info or {}).get("creationTime") or creation,
             }
             for name, info in dbs.items()
         ],
@@ -482,12 +513,20 @@ def transform_backup_status_v1(raw: dict) -> dict:
 def transform_restore_status_v1(raw: dict) -> dict:
     raw = raw or {}
     dbs = raw.get("databases") or {}
+
+    storage_name = raw.get("storageName") or raw.get("storage") or raw.get("storage_name") or ""
+    blob_path = raw.get("blobPath") or raw.get("externalBackupPath") or raw.get("blob_path") or ""
+    creation = raw.get("created") or raw.get("creationTime") or raw.get("creation") or raw.get("timestamp") or raw.get("startTime")
+    completion = raw.get("completed") or raw.get("completionTime") or raw.get("completedTime")
+
     out = {
         "status": raw.get("status"),
         "errorMessage": raw.get("errorMessage") or raw.get("error"),
         "restoreId": raw.get("trackingId") or raw.get("restoreId"),
-        "creationTime": raw.get("created"),
-        "completionTime": raw.get("completed") or raw.get("completionTime"),
+        "storageName": storage_name,
+        "blobPath": blob_path,
+        "creationTime": creation,
+        "completionTime": completion,
         "databases": [],
     }
     for prev_name, info in dbs.items():
@@ -499,6 +538,6 @@ def transform_restore_status_v1(raw: dict) -> dict:
             "duration": info.get("duration"),
             "path": info.get("path"),
             "errorMessage": info.get("errorMessage") or info.get("error"),
-            "creationTime": info.get("created") or raw.get("created"),
+            "creationTime": info.get("created") or info.get("creationTime") or creation,
         })
     return out

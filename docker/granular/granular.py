@@ -1155,38 +1155,33 @@ class NewBackupStatus(flask_restful.Resource):
                 pass
             if "default" not in candidates:
                 candidates.append("default")
-
             for cand in candidates:
                 status_try = backups.build_backup_status_file_path(backup_id, cand, external_backup_root)
                 if _exists(status_try):
                     namespace = cand
                     break
-
         if not namespace:
             namespace = configs.default_namespace()
 
         status_path = backups.build_backup_status_file_path(backup_id, namespace, external_backup_root)
-        if not _exists(status_path):
-            if external_backup_root is None and not self.s3:
-                base = os.getenv("EXTERNAL_STORAGE_ROOT")
-                if base:
-                    candidate = os.path.join(base, namespace, backup_id, "status.json")
-                    if os.path.isfile(candidate):
-                        external_backup_root = base
-                        status_path = backups.build_backup_status_file_path(backup_id, namespace, external_backup_root)
 
-        if not _exists(status_path):
-            return {"backupId": backup_id,
-                    "message": "Backup is not found. If this backup is in external storage, pass ?blobPath=<prefix>.",
-                    "status": "Failed"}, http.client.NOT_FOUND
+        existed_before = _exists(status_path)
+
+        term_resp = TerminateBackupEndpoint().post(backup_id)
+        term_code = getattr(term_resp, "status_code", None)
+        if isinstance(term_resp, tuple) and term_code is None:
+            try:
+                term_code = int(term_resp[1])
+            except Exception:
+                term_code = None
 
         try:
             target_dir = backups.build_backup_path(backup_id, namespace, external_backup_root)
             if self.s3:
                 self.s3.delete_objects(target_dir)
             else:
-                TerminateBackupEndpoint().post(backup_id)
-                shutil.rmtree(target_dir, ignore_errors=False)
+                if os.path.isdir(target_dir):
+                    shutil.rmtree(target_dir, ignore_errors=False)
 
                 if external_backup_root is None:
                     ns_dir = backups.build_namespace_path(namespace)
@@ -1194,12 +1189,24 @@ class NewBackupStatus(flask_restful.Resource):
                         shutil.rmtree(ns_dir, ignore_errors=True)
 
         except Exception as e:
+            if not existed_before and term_code == http.client.NOT_FOUND:
+                return {"backupId": backup_id, "message": "Backup is not found.", "status": "Failed"}, http.client.NOT_FOUND
             self.log.exception("Delete failed for %s: %s", backup_id, e)
             return {"backupId": backup_id,
                     "message": f"An error occurred while deleting backup: {e}",
                     "status": "Failed"}, http.client.INTERNAL_SERVER_ERROR
 
-        return {"backupId": backup_id, "message": "Backup deleted successfully.", "status": "Successful"}, http.client.OK
+        if not existed_before and term_code == http.client.NOT_FOUND:
+            return {"backupId": backup_id, "message": "Backup is not found.", "status": "Failed"}, http.client.NOT_FOUND
+
+        if term_code and 200 <= term_code < 300:
+            msg = "Backup terminated successfully. Cleanup completed."
+        elif term_code == http.client.NOT_FOUND:
+            msg = "No active backup. Cleanup completed."
+        else:
+            msg = "Termination attempted. Cleanup completed."
+
+        return {"backupId": backup_id, "message": msg, "status": "Successful"}, http.client.OK
 
 
 class NewRestore(flask_restful.Resource):
@@ -1359,36 +1366,45 @@ class NewRestoreStatus(flask_restful.Resource):
             return {"restoreId": restore_id, "message": "Restore ID is not specified", "status": "Failed"}, http.client.BAD_REQUEST
 
         resp = TerminateRestoreEndpoint().post(restore_id)
-        code = getattr(resp, "status_code", None)
+        _, term_code, _ = backups.extract_status(resp)
+
         try:
             backup_id, namespace = backups.extract_backup_id_from_tracking_id(restore_id)
         except Exception as e:
             self.log.exception(e)
-            return {"restoreId": restore_id,
-                    "message": "Malformed restore ID; termination attempted but cleanup skipped.",
-                    "status": "Successful"}, http.client.OK
+            return {
+                "restoreId": restore_id,
+                "message": "Malformed restore ID; termination attempted but cleanup skipped.",
+                "status": "Successful"
+            }, http.client.OK
 
         external_backup_path = request.args.get("blobPath") or request.args.get("externalBackupPath")
         if not external_backup_path:
-            return {"restoreId": restore_id,
-                    "message": "blobPath query parameter is required for cleanup (e.g. ?blobPath=tmp/a/b/c).",
-                    "status": "Failed"}, http.client.BAD_REQUEST
-        external_backup_root = backups.build_external_backup_root(external_backup_path) if external_backup_path else None
+            return {
+                "restoreId": restore_id,
+                "message": "blobPath query parameter is required for cleanup (e.g. ?blobPath=tmp/a/b/c).",
+                "status": "Failed"
+            }, http.client.BAD_REQUEST
 
+        external_backup_root = backups.build_external_backup_root(external_backup_path)
         status_path = backups.build_restore_status_file_path(backup_id, restore_id, namespace, external_backup_root)
-
-        # restore_dir = os.path.dirname(status_path)
         backup_base = backups.build_backup_path(backup_id, namespace, external_backup_root)
         pattern_name = f"{restore_id}"
         pattern_glob = os.path.join(backup_base, pattern_name + "*")
 
+        def _exists(p: str) -> bool:
+            if self.s3:
+                try:
+                    return self.s3.is_file_exists(p)
+                except Exception:
+                    return False
+            return os.path.isfile(p)
+
+        existed_before = _exists(status_path)
+
         try:
             if self.s3:
-                prefix = os.path.join(backup_base, pattern_name).rstrip("/") + ""
-                if not prefix.startswith(backup_base):
-                    return {"restoreId": restore_id,
-                            "message": "Unsafe restore prefix; refusing to delete.",
-                            "status": "Failed"}, http.client.BAD_REQUEST
+                prefix = os.path.join(backup_base, pattern_name).rstrip("/")
                 self.s3.delete_objects(prefix if prefix.endswith("/") else prefix)
             else:
                 for p in glob.glob(pattern_glob):
@@ -1401,14 +1417,23 @@ class NewRestoreStatus(flask_restful.Resource):
                         pass
         except Exception as e:
             self.log.exception("Restore cleanup failed for %s: %s", restore_id, e)
-            return {"restoreId": restore_id,
-                    "message": f"Termination attempted; cleanup encountered an error: {e}",
-                    "status": "Successful"}, http.client.OK
+            return {
+                "restoreId": restore_id,
+                "message": f"Termination attempted; cleanup encountered an error: {e}",
+                "status": "Successful"
+            }, http.client.OK
 
-        if code == 404:
-            msg = "No active restore (already finished or not found). Cleanup completed."
-        elif code and 200 <= code < 300:
+        if term_code == 404 and not existed_before:
+            return {
+                "restoreId": restore_id,
+                "message": "Restore is not found.",
+                "status": "Failed"
+            }, http.client.NOT_FOUND
+
+        if term_code and 200 <= term_code < 300:
             msg = "Restore terminated successfully. Cleanup completed."
+        elif term_code == 404:
+            msg = "No active restore (already finished or not found). Cleanup completed."
         else:
             msg = "Termination attempted. Cleanup completed."
 
