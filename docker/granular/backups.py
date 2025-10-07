@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import datetime
 import json
 import logging
 import shutil
@@ -22,8 +23,8 @@ import time
 import storage_s3
 import configs
 import utils
+from datetime import timezone
 from itertools import groupby
-from datetime import datetime, timezone
 
 
 class BackupNotFoundException(Exception):
@@ -443,7 +444,7 @@ def _as_iso8601(v):
     if isinstance(v, (int, float)):
         if v > 1e12:  
             v = v / 1000.0
-        return datetime.fromtimestamp(v, tz=timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z')
+        return datetime.datetime.fromtimestamp(v, tz=timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z')
     return str(v)
 
 def _parse_bytes(v):
