@@ -285,7 +285,8 @@ class GranularBackupRequestEndpoint(flask_restful.Resource):
                                'databases',
                                'keep',
                                'compressionLevel',
-                               'externalBackupPath']
+                               'externalBackupPath',
+                               'storageName']
 
     def perform_granular_backup(self, backup_request):
         # # for gke full backup
@@ -1083,8 +1084,46 @@ class NewBackup(flask_restful.Resource):
         backup_request = {
             "databases": list(databases),
             "externalBackupPath": blob_path,
+            "storageName": storage_name
         }
-        return GranularBackupRequestEndpoint().perform_granular_backup(backup_request)
+        resp = GranularBackupRequestEndpoint().perform_granular_backup(backup_request)
+        body = None
+        code = None
+        if isinstance(resp, tuple) and len(resp) >= 2:
+            body, code = resp[0], resp[1]
+        elif isinstance(resp, dict):
+            body, code = resp, http.client.ACCEPTED
+        else:
+            return resp
+
+        try:
+            import datetime
+            created_iso = datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+        except Exception:
+            created_iso = ""
+
+        dbs_out = []
+        for d in (databases or []):
+            if isinstance(d, dict):
+                name = d.get("databaseName") or d.get("name") or ""
+            else:
+                name = str(d or "")
+            dbs_out.append({
+                "databaseName": name,
+                "status": "notStarted" if name else "",
+                "creationTime": created_iso
+            })
+
+        enriched = {
+            "status": "notStarted",
+            "backupId": body.get("backupId") if isinstance(body, dict) else None,
+            "creationTime": created_iso,
+            "storageName": storage_name or "",
+            "blobPath": blob_path or "",
+            "databases": dbs_out
+        }
+
+        return enriched, code
 
 
 class NewBackupStatus(flask_restful.Resource):
@@ -1109,7 +1148,6 @@ class NewBackupStatus(flask_restful.Resource):
 
         external_backup_path = request.args.get("blobPath")
         external_backup_root = backups.build_external_backup_root(external_backup_path) if external_backup_path else None
-        storage_name = request.args.get("storageName") or os.environ.get("STORAGE_NAME")
 
         status_path = backups.build_backup_status_file_path(backup_id, namespace, external_backup_root)
 
@@ -1320,7 +1358,71 @@ class NewRestore(flask_restful.Resource):
         )
         worker.start()
 
-        return {"restoreId": tracking_id}, http.client.ACCEPTED
+        try:
+            import datetime
+            created_iso = datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+        except Exception:
+            created_iso = ""
+
+        storage_name = body.get("storageName") or ""
+        blob_path = body.get("blobPath") or external_backup_path or ""
+
+        dbs_out = []
+        for prev in (requested or []):
+            prev_name = prev or ""
+            restored_as = databases_mapping.get(prev_name) if isinstance(databases_mapping, dict) else None
+            dbs_out.append({
+                "previousDatabaseName": prev_name,
+                "databaseName": restored_as or prev_name,
+                "status": "notStarted" if prev_name else "",
+                "creationTime": created_iso
+            })
+
+        enriched = {
+            "status": "notStarted",
+            "restoreId": tracking_id,
+            "creationTime": created_iso,
+            "storageName": storage_name,
+            "blobPath": blob_path,
+            "databases": dbs_out
+        }
+
+        try:
+            restore_status = {
+                "trackingId": tracking_id,
+                "restoreId": tracking_id,
+                "status": "notStarted",
+                "errorMessage": None,
+                "created": created_iso,
+                "creationTime": created_iso,
+                "completionTime": None,
+                "databases": { prev: {"databaseName": (databases_mapping.get(prev) if isinstance(databases_mapping, dict) else prev) or prev,
+                                       "status": "notStarted",
+                                       "creationTime": created_iso} for prev in (requested or []) },
+                "storageName": storage_name,
+                "blobPath": blob_path,
+                "externalBackupPath": external_backup_path or "",
+                "sourceBackupId": backup_id
+            }
+            try:
+                status_path = backups.build_restore_status_file_path(backup_id, tracking_id, namespace,
+                                                                     backups.build_external_backup_root(external_backup_path) if external_backup_path else None)
+            except TypeError:
+                status_path = backups.build_restore_status_file_path(backup_id, tracking_id, namespace)
+
+            try:
+                if hasattr(utils, "write_in_json"):
+                    utils.write_in_json(status_path, restore_status)
+                else:
+                    os.makedirs(os.path.dirname(status_path), exist_ok=True)
+                    with open(status_path, "w") as sf:
+                        json.dump(restore_status, sf)
+            except Exception:
+                self.log.exception("Failed to persist initial restore status for %s", tracking_id)
+        except Exception:
+            self.log.debug("Skipping initial restore status persist for %s", tracking_id)
+
+        return enriched, http.client.OK
 
 
 class NewRestoreStatus(flask_restful.Resource):
@@ -1364,7 +1466,7 @@ class NewRestoreStatus(flask_restful.Resource):
                 return "Restore is not found.", http.client.NOT_FOUND
             with open(status_path) as f:
                 raw = json.load(f)
-                
+
         if external_backup_path and not (raw.get("blobPath") or raw.get("externalBackupPath")):
             raw["blobPath"] = external_backup_path
         if storage_name and not raw.get("storageName"):
