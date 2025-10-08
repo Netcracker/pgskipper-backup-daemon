@@ -415,28 +415,6 @@ def sweep_by_policy():
 
     log.info("Backups sweeping finished.")
 
-def extract_status(resp):
-    if hasattr(resp, "status_code"):
-        try:
-            body = resp.get_json(silent=True)
-        except Exception:
-            body = None
-        if body is None:
-            try:
-                body = resp.get_data(as_text=True)
-            except Exception:
-                body = None
-        return body, int(resp.status_code), None
-
-    if isinstance(resp, tuple):
-        if len(resp) == 2:
-            body, code = resp
-            return body, int(code), None
-        if len(resp) == 3:
-            body, code, headers = resp
-            return body, int(code), headers
-
-    return None, None, None
 
 def _as_iso8601(v):
     if v is None or v == "":
