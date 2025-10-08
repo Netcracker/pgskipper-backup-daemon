@@ -1171,26 +1171,23 @@ class NewBackupStatus(flask_restful.Resource):
     @superuser_authorization
     def delete(self, backup_id):
         if not backup_id:
-            return jsonify({"backupId": backup_id, "message": "Backup ID is not specified", "status": "Failed"}), http.client.BAD_REQUEST
+            return {"backupId": backup_id, "message": "Backup ID is not specified", "status": "Failed"}, http.client.BAD_REQUEST
 
         req_ns = request.args.get("namespace")
         external_backup_path = request.args.get("blobPath") or request.args.get("externalBackupPath")
         if not external_backup_path:
-            return jsonify({
-                "backupId": backup_id,
-                "message": "blobPath query parameter is required (e.g. ?blobPath=tmp/a/b/c).",
-                "status": "Failed"
-            }), http.client.BAD_REQUEST
-
+            return {"backupId": backup_id,
+                    "message": "blobPath query parameter is required (e.g. ?blobPath=tmp/a/b/c).",
+                    "status": "Failed"}, http.client.BAD_REQUEST
         external_backup_root = backups.build_external_backup_root(external_backup_path)
 
-        def _exists(path: str) -> bool:
+        def _exists(p: str) -> bool:
             if self.s3:
                 try:
-                    return self.s3.is_file_exists(path)
+                    return self.s3.is_file_exists(p)
                 except Exception:
                     return False
-            return os.path.isfile(path)
+            return os.path.isfile(p)
 
         namespace = req_ns
         if not namespace:
@@ -1210,61 +1207,55 @@ class NewBackupStatus(flask_restful.Resource):
             namespace = configs.default_namespace()
 
         status_path = backups.build_backup_status_file_path(backup_id, namespace, external_backup_root)
-        target_dir = backups.build_backup_path(backup_id, namespace, external_backup_root)
+        existed_before = _exists(status_path)
 
-        existed_before_status = _exists(status_path)
-        existed_before_dir = (self.s3 and self.s3.is_prefix_exists(target_dir)) if hasattr(self.s3, "is_prefix_exists") else os.path.isdir(target_dir)
-        resource_exists = existed_before_status or existed_before_dir
-
-        if not resource_exists:
-            try:
-                TerminateBackupEndpoint().post(backup_id)
-            except Exception:
-                pass
-            return jsonify({"backupId": backup_id, "message": "Backup is not found.", "status": "Failed"}), http.client.NOT_FOUND
-
-        term_resp = TerminateBackupEndpoint().post(backup_id)
-        term_body = None
-        term_code = None
+        resp = TerminateBackupEndpoint().post(backup_id)
+        term_body, term_code = None, None
         try:
-            if isinstance(term_resp, Response):
-                term_body = term_resp.get_data(as_text=True)
-                term_code = getattr(term_resp, "status_code", None)
-            elif isinstance(term_resp, tuple) and len(term_resp) >= 2:
-                term_body = term_resp[0]
-                try: term_code = int(term_resp[1])
-                except Exception: term_code = None
-            elif isinstance(term_resp, dict):
-                term_body = json.dumps(term_resp)
+            if isinstance(resp, Response):
+                term_body = resp.get_data(as_text=True)
+                term_code = getattr(resp, "status_code", None)
+            elif isinstance(resp, tuple) and len(resp) >= 2:
+                term_body = resp[0]
+                try:
+                    term_code = int(resp[1])
+                except Exception:
+                    term_code = None
+            elif isinstance(resp, dict):
+                term_body = json.dumps(resp)
                 term_code = http.client.OK
-            elif isinstance(term_resp, str):
-                term_body = term_resp
+            elif isinstance(resp, (bytes, bytearray)):
+                term_body = resp.decode("utf-8", "replace")
+            elif isinstance(resp, str):
+                term_body = resp
             else:
-                term_body = repr(term_resp)
+                term_body = repr(resp)
         except Exception:
-            term_body = repr(term_resp)
+            term_body = repr(resp)
 
         self.log.info("Terminate response for %s: code=%s body=%s", backup_id, term_code, term_body)
 
         try:
+            target_dir = backups.build_backup_path(backup_id, namespace, external_backup_root)
             if self.s3:
                 self.s3.delete_objects(target_dir)
             else:
                 if os.path.isdir(target_dir):
                     shutil.rmtree(target_dir, ignore_errors=False)
-
                 if external_backup_root is None:
                     ns_dir = backups.build_namespace_path(namespace)
                     if os.path.isdir(ns_dir) and not os.listdir(ns_dir) and namespace != "default":
                         shutil.rmtree(ns_dir, ignore_errors=True)
         except Exception as e:
+            if not existed_before and term_code == http.client.NOT_FOUND:
+                return {"backupId": backup_id, "message": "Backup is not found.", "status": "Failed"}, http.client.NOT_FOUND
             self.log.exception("Delete failed for %s: %s", backup_id, e)
-            return jsonify({
-                "backupId": backup_id,
-                "message": f"An error occurred while deleting backup: {e}",
-                "status": "Failed"
-            }), http.client.INTERNAL_SERVER_ERROR
+            return {"backupId": backup_id,
+                    "message": f"An error occurred while deleting backup: {e}",
+                    "status": "Failed"}, http.client.INTERNAL_SERVER_ERROR
 
+        if not existed_before and term_code == http.client.NOT_FOUND:
+            return {"backupId": backup_id, "message": "Backup is not found.", "status": "Failed"}, http.client.NOT_FOUND
 
         if term_code and 200 <= term_code < 300:
             msg = "Backup terminated successfully. Cleanup completed."
@@ -1273,12 +1264,12 @@ class NewBackupStatus(flask_restful.Resource):
         else:
             msg = "Termination attempted. Cleanup completed."
 
-        return jsonify({
+        return {
             "backupId": backup_id,
             "message": msg,
             "status": "Successful",
             "termination": {"code": term_code, "body": term_body}
-        }), http.client.OK
+        }, http.client.OK
 
 class NewRestore(flask_restful.Resource):
     __endpoints = ["/api/v1/restore/<backup_id>"]
@@ -1588,11 +1579,15 @@ class NewRestoreStatus(flask_restful.Resource):
                 term_code = getattr(resp, "status_code", None)
             elif isinstance(resp, tuple) and len(resp) >= 2:
                 term_body = resp[0]
-                try: term_code = int(resp[1])
-                except Exception: term_code = None
+                try:
+                    term_code = int(resp[1])
+                except Exception:
+                    term_code = None
             elif isinstance(resp, dict):
-                term_body = json.dumps(resp)
+                term_body = json.dumps(resp)   
                 term_code = http.client.OK
+            elif isinstance(resp, (bytes, bytearray)):
+                term_body = resp.decode("utf-8", "replace")
             elif isinstance(resp, str):
                 term_body = resp
             else:
@@ -1624,19 +1619,19 @@ class NewRestoreStatus(flask_restful.Resource):
                 "termination": {"code": term_code, "body": term_body}
             }), http.client.OK
 
+        if term_code == 404:
+            return {"restoreId": restore_id, "message": "Restore is not found.", "status": "Failed",
+                    "termination": {"code": term_code, "body": term_body}}, http.client.NOT_FOUND
+
         if term_code and 200 <= term_code < 300:
             msg = "Restore terminated successfully. Cleanup completed."
-        elif term_code == http.client.NOT_FOUND:
+        elif term_code == 404:
             msg = "No active restore (already finished or not found). Cleanup completed."
         else:
             msg = "Termination attempted. Cleanup completed."
 
-        return jsonify({
-            "restoreId": restore_id,
-            "message": msg,
-            "status": "Successful",
-            "termination": {"code": term_code, "body": term_body}
-        }), http.client.OK
+        return {"restoreId": restore_id, "message": msg, "status": "Successful",
+                "termination": {"code": term_code, "body": term_body}}, http.client.OK
     
 def get_pgbackrest_service():
     if os.getenv("BACKUP_FROM_STANDBY") == "true":
