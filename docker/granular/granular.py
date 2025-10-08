@@ -1211,12 +1211,29 @@ class NewBackupStatus(flask_restful.Resource):
         existed_before = _exists(status_path)
 
         term_resp = TerminateBackupEndpoint().post(backup_id)
-        term_code = getattr(term_resp, "status_code", None)
-        if isinstance(term_resp, tuple) and term_code is None:
-            try:
-                term_code = int(term_resp[1])
-            except Exception:
-                term_code = None
+        term_body = None
+        term_code = None
+        try:
+            if isinstance(term_resp, Response):
+                term_body = term_resp.get_data(as_text=True)
+                term_code = getattr(term_resp, "status_code", None)
+            elif isinstance(term_resp, tuple) and len(term_resp) >= 2:
+                term_body = term_resp[0]
+                try:
+                    term_code = int(term_resp[1])
+                except Exception:
+                    term_code = None
+            elif isinstance(term_resp, dict):
+                term_body = json.dumps(term_resp)
+                term_code = http.client.OK
+            elif isinstance(term_resp, str):
+                term_body = term_resp
+            else:
+                term_body = repr(term_resp)
+        except Exception:
+            term_body = repr(term_resp)
+
+        self.log.info("Terminate response for %s: code=%s body=%s", backup_id, term_code, term_body)
 
         try:
             target_dir = backups.build_backup_path(backup_id, namespace, external_backup_root)
@@ -1249,7 +1266,7 @@ class NewBackupStatus(flask_restful.Resource):
         else:
             msg = "Termination attempted. Cleanup completed."
 
-        return {"backupId": backup_id, "message": msg, "status": "Successful"}, http.client.OK
+        return {"backupId": backup_id, "message": msg, "status": "Successful", "termination": {"code": term_code, "body": term_body}}, http.client.OK
 
 
 class NewRestore(flask_restful.Resource):
@@ -1479,7 +1496,30 @@ class NewRestoreStatus(flask_restful.Resource):
             return {"restoreId": restore_id, "message": "Restore ID is not specified", "status": "Failed"}, http.client.BAD_REQUEST
 
         resp = TerminateRestoreEndpoint().post(restore_id)
-        _, term_code, _ = backups.extract_status(resp)
+        resp = TerminateRestoreEndpoint().post(restore_id)
+        term_body = None
+        term_code = None
+        try:
+            if isinstance(resp, Response):
+                term_body = resp.get_data(as_text=True)
+                term_code = getattr(resp, "status_code", None)
+            elif isinstance(resp, tuple) and len(resp) >= 2:
+                term_body = resp[0]
+                try:
+                    term_code = int(resp[1])
+                except Exception:
+                    term_code = None
+            elif isinstance(resp, dict):
+                term_body = json.dumps(resp)
+                term_code = http.client.OK
+            elif isinstance(resp, str):
+                term_body = resp
+            else:
+                term_body = repr(resp)
+        except Exception:
+            term_body = repr(resp)
+
+        self.log.info("Terminate response for restore %s: code=%s body=%s", restore_id, term_code, term_body)
 
         try:
             backup_id, namespace = backups.extract_backup_id_from_tracking_id(restore_id)
@@ -1488,7 +1528,8 @@ class NewRestoreStatus(flask_restful.Resource):
             return {
                 "restoreId": restore_id,
                 "message": "Malformed restore ID; termination attempted but cleanup skipped.",
-                "status": "Successful"
+                "status": "Successful",
+                "termination": {"code": term_code, "body": term_body}
             }, http.client.OK
 
         external_backup_path = request.args.get("blobPath") or request.args.get("externalBackupPath")
@@ -1496,7 +1537,8 @@ class NewRestoreStatus(flask_restful.Resource):
             return {
                 "restoreId": restore_id,
                 "message": "blobPath query parameter is required for cleanup (e.g. ?blobPath=tmp/a/b/c).",
-                "status": "Failed"
+                "status": "Failed",
+                "termination": {"code": term_code, "body": term_body}
             }, http.client.BAD_REQUEST
 
         external_backup_root = backups.build_external_backup_root(external_backup_path)
@@ -1533,14 +1575,16 @@ class NewRestoreStatus(flask_restful.Resource):
             return {
                 "restoreId": restore_id,
                 "message": f"Termination attempted; cleanup encountered an error: {e}",
-                "status": "Successful"
+                "status": "Successful",
+                "termination": {"code": term_code, "body": term_body}
             }, http.client.OK
 
         if term_code == 404 and not existed_before:
             return {
                 "restoreId": restore_id,
                 "message": "Restore is not found.",
-                "status": "Failed"
+                "status": "Failed",
+                "termination": {"code": term_code, "body": term_body}
             }, http.client.NOT_FOUND
 
         if term_code and 200 <= term_code < 300:
@@ -1550,7 +1594,7 @@ class NewRestoreStatus(flask_restful.Resource):
         else:
             msg = "Termination attempted. Cleanup completed."
 
-        return {"restoreId": restore_id, "message": msg, "status": "Successful"}, http.client.OK
+        return {"restoreId": restore_id, "message": msg, "status": "Successful", "termination": {"code": term_code, "body": term_body}}, http.client.OK
 
     
 def get_pgbackrest_service():
