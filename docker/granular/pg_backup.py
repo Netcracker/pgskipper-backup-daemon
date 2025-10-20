@@ -32,7 +32,7 @@ import storage_s3
 
 class PostgreSQLDumpWorker(Thread):
 
-    def __init__(self, databases, backup_request):
+    def __init__(self, databases, backup_request, blob_path=None):
         Thread.__init__(self)
 
         self.log = logging.getLogger("PostgreSQLDumpWorker")
@@ -50,7 +50,11 @@ class PostgreSQLDumpWorker(Thread):
         self.bin_path = configs.get_pgsql_bin_path(self.postgres_version)
         self.parallel_jobs = configs.get_parallel_jobs()
         self.databases = databases if databases else []
-        self.backup_dir = backups.build_backup_path(self.backup_id, self.namespace, self.external_backup_root)
+        if blob_path is not None:
+            self.blob_path = blob_path
+            self.backup_dir = backups.build_backup_path(self.backup_id, blob_path=blob_path)
+        else:
+            self.backup_dir = backups.build_backup_path(self.backup_id, self.namespace, self.external_backup_root)
         self.create_backup_dir()
         self.s3 = storage_s3.AwsS3Vault() if os.environ['STORAGE_TYPE'] == "s3" else None
         self._cancel_event = Event()
@@ -111,7 +115,7 @@ class PostgreSQLDumpWorker(Thread):
             self.flush_status(self.external_backup_root)
 
     def flush_status(self, external_backup_storage=None):
-        path = backups.build_backup_status_file_path(self.backup_id, self.namespace, external_backup_storage)
+        path = backups.build_backup_status_file_path(self.backup_id, self.namespace, external_backup_storage, self.blob_path)
         utils.write_in_json(path, self.status)
         if self.s3:
             try:
@@ -270,7 +274,7 @@ class PostgreSQLDumpWorker(Thread):
                     command.extend(['-T','cron.*'])
 
             database_backup_path = backups.build_database_backup_path(self.backup_id, database,
-                                                                  self.namespace, self.external_backup_root)
+                                                                  self.namespace, self.external_backup_root, blob_path=self.blob_path)
 
             with open(database_backup_path, 'w+') as dump, \
                     open(self.stderr_file(database), "w+") as stderr:
@@ -350,9 +354,9 @@ class PostgreSQLDumpWorker(Thread):
         self.log.debug(self.log_msg("Roles {} have been fetched for backup ".format(rolesList)))
 
         roles_backup_path = backups.build_roles_backup_path(self.backup_id, database,
-                                                            self.namespace, self.external_backup_root)
+                                                            self.namespace, self.external_backup_root, self.blob_path)
         database_backup_path = backups.build_database_backup_path(self.backup_id, database,
-                                                                  self.namespace, self.external_backup_root)
+                                                                  self.namespace, self.external_backup_root, self.blob_path)
 
         pg_dump_backup_path = backups.build_backup_path(self.backup_id, self.namespace, self.external_backup_root)
         path_for_parallel_flag_backup = os.path.join(pg_dump_backup_path, database)
@@ -401,7 +405,7 @@ class PostgreSQLDumpWorker(Thread):
 
     def dump_roles_for_db(self, roles, database):
         roles_backup_path = backups.build_roles_backup_path(self.backup_id, database,
-                                                            self.namespace, self.external_backup_root)
+                                                            self.namespace, self.external_backup_root, self.blob_path)
 
         with open(roles_backup_path, 'w+') as dump, \
                 open(self.stderr_file(database), "w+") as stderr:
@@ -446,9 +450,9 @@ class PostgreSQLDumpWorker(Thread):
         os.remove(self.stderr_file(database))
 
     def on_success(self, database):
-        database_backup_path = backups.build_database_backup_path(self.backup_id, database, self.namespace, self.external_backup_root)
+        database_backup_path = backups.build_database_backup_path(self.backup_id, database, self.namespace, self.external_backup_root, self.blob_path)
 
-        pg_dump_backup_path = backups.build_backup_path(self.backup_id, self.namespace, self.external_backup_root)
+        pg_dump_backup_path = backups.build_backup_path(self.backup_id, self.namespace, self.external_backup_root, self.blob_path)
         path_for_parallel_flag_backup = os.path.join(pg_dump_backup_path, database)
         
         if self.s3:
@@ -463,7 +467,7 @@ class PostgreSQLDumpWorker(Thread):
                 size_bytes = os.path.getsize(database_backup_path)
         self.update_status('path', backups.
                            build_database_backup_full_path(
-            self.backup_id, database, self.location, self.namespace), database)
+            self.backup_id, database, self.location, self.namespace, blob_path=self.blob_path), database)
         self.update_status('sizeBytes', size_bytes, database)
         self.update_status('size', backups.sizeof_fmt(size_bytes), database)
         if self.encryption:
