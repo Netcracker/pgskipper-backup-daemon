@@ -94,11 +94,8 @@ class PostgreSQLRestoreWorker(Thread):
         return "[trackingId=%s] %s" % (self.tracking_id, msg)
 
     def flush_status(self, external_backup_storage=None):
-        if self.blob_path is not None:
-            path = backups.build_restore_status_file_path(self.backup_id, self.tracking_id, blob_path=self.blob_path)
-        else:
-            path = backups.build_restore_status_file_path(self.backup_id, self.tracking_id, self.namespace,
-                                                          external_backup_storage)
+        path = backups.build_restore_status_file_path(self.backup_id, self.tracking_id, self.namespace,
+                                                          external_backup_storage, self.blob_path)
         utils.write_in_json(path, self.status)
         if self.s3:
             try:
@@ -118,6 +115,8 @@ class PostgreSQLRestoreWorker(Thread):
             database_details = databases_section.get(database)
             if not database_details:
                 database_details = {}
+                if self.databases_mapping and self.databases_mapping[database]:
+                    database_details['newDatabaseName'] = self.databases_mapping[database]
                 databases_section[database] = database_details
 
             database_details[key] = value
