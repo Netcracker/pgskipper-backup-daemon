@@ -50,11 +50,8 @@ class PostgreSQLDumpWorker(Thread):
         self.bin_path = configs.get_pgsql_bin_path(self.postgres_version)
         self.parallel_jobs = configs.get_parallel_jobs()
         self.databases = databases if databases else []
-        if blob_path is not None:
-            self.blob_path = blob_path
-            self.backup_dir = backups.build_backup_path(self.backup_id, blob_path=blob_path)
-        else:
-            self.backup_dir = backups.build_backup_path(self.backup_id, self.namespace, self.external_backup_root)
+        self.blob_path = blob_path
+        self.backup_dir = backups.build_backup_path(self.backup_id, self.namespace, self.external_backup_root, self.blob_path)
         self.create_backup_dir()
         self.s3 = storage_s3.AwsS3Vault() if os.environ['STORAGE_TYPE'] == "s3" else None
         self._cancel_event = Event()

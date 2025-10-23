@@ -78,10 +78,7 @@ def is_valid_namespace(namespace):
 
 
 def backup_exists(backup_id, namespace=configs.default_namespace(), external_backup_storage=None, blob_path=None):
-    if blob_path is not None:
-        return os.path.exists(build_backup_path(backup_id, blob_path=blob_path))
-    else:
-        return os.path.exists(build_backup_path(backup_id, namespace, external_backup_storage))
+    return os.path.exists(build_backup_path(backup_id, namespace, external_backup_storage, blob_path))
 
 
 def database_backup_exists(backup_id, database, namespace=configs.default_namespace(), external_backup_storage=None, blob_path=None):
@@ -96,20 +93,20 @@ def build_database_backup_path(backup_id, database,
                                namespace=configs.default_namespace(), external_backup_storage=None, blob_path=None):
     ext = '_enc.dump' if configs.get_encryption() else '.dump'
     return '%s/%s%s' % (
-                build_backup_path(backup_id, namespace, external_backup_storage, blob_path=blob_path), database, ext)
+                build_backup_path(backup_id, namespace, external_backup_storage, blob_path), database, ext)
 
 def build_roles_backup_path(backup_id, database,
                             namespace=configs.default_namespace(), external_backup_storage=None, blob_path=None):
     ext = 'roles_enc.sql' if configs.get_encryption() else 'roles.sql'
     return "%s/%s.%s" % (
-        build_backup_path(backup_id, namespace, external_backup_storage, blob_path=blob_path), database, ext)
+        build_backup_path(backup_id, namespace, external_backup_storage, blob_path), database, ext)
 
 def build_database_backup_full_path(backup_id, database, storage_root,
                                         namespace=configs.default_namespace(),
                                         blob_path=None):
     ext = '_enc.dump' if configs.get_encryption() else '.dump'
     if blob_path is not None:
-        return '%s/backups/%s/logical/dbaas/%s%s' % (blob_path, backup_id, database, ext)
+        return '%s/%s/%s%s' % (blob_path, backup_id, database, ext)
     else:
         return '%s/%s/%s/%s%s' % (storage_root, namespace, backup_id, database, ext)
 
@@ -120,7 +117,7 @@ def build_database_restore_report_path(backup_id, database, restore_tracking_id,
 
 def build_backup_path(backup_id, namespace=configs.default_namespace(), external_backup_storage=None, blob_path=None):
     if blob_path is not None:
-        return '%s/backups/%s/logical/dbaas' % (blob_path, backup_id)
+        return '%s/%s' % (blob_path, backup_id)
     else:
         return '%s/%s/%s' % (configs.backups_storage() if external_backup_storage is None else external_backup_storage,
                              namespace, backup_id)
@@ -131,18 +128,12 @@ def build_external_backup_root(external_backup_path):
 
 
 def build_backup_status_file_path(backup_id, namespace=configs.default_namespace(), external_backup_storage=None, blob_path=None):
-    if blob_path is not None:
-        return '%s/status.json' % build_backup_path(backup_id, blob_path=blob_path)
-    else:
-        return '%s/status.json' % build_backup_path(backup_id, namespace, external_backup_storage)
+    return '%s/status.json' % build_backup_path(backup_id, namespace, external_backup_storage, blob_path)
 
 
 def build_restore_status_file_path(backup_id, tracking_id, namespace=configs.default_namespace(),
                                    external_backup_storage=None, blob_path=None):
-    if blob_path is not None:
-        return '%s/%s.json' % (build_backup_path(backup_id, blob_path=blob_path), tracking_id)
-    else:
-        return '%s/%s.json' % (build_backup_path(backup_id, namespace, external_backup_storage), tracking_id)
+    return '%s/%s.json' % (build_backup_path(backup_id, namespace, external_backup_storage, blob_path), tracking_id)
 
 
 def get_key_name_by_backup_id(backup_id, namespace, external_backup_storage=None, blob_path=None):
