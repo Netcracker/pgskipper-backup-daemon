@@ -65,12 +65,12 @@ class PostgreSQLRestoreWorker(Thread):
         self.parallel_jobs = configs.get_parallel_jobs()
         self.s3 = storage_s3.AwsS3Vault() if os.environ['STORAGE_TYPE'] == "s3" else None
         self.blob_path = blobPath
-        self.backup_dir = backups.build_backup_path(self.backup_id, self.namespace, self.external_backup_root, self.blob_path)
+        self.backup_dir = backups.build_backup_path(self.backup_id, self.namespace, self.external_backup_root)
         self.create_backup_dir(self.backup_dir)
         if configs.get_encryption():
             self.encryption = True
             self.key_name = backups.get_key_name_by_backup_id(self.backup_id,
-                                                              self.namespace, self.external_backup_root, self.blob_path) #TODO: check if this is correct
+                                                              self.namespace, self.external_backup_root)
         else:
             self.encryption = False
         if databases_mapping:
@@ -95,12 +95,12 @@ class PostgreSQLRestoreWorker(Thread):
 
     def flush_status(self, external_backup_storage=None):
         path = backups.build_restore_status_file_path(self.backup_id, self.tracking_id, self.namespace,
-                                                          external_backup_storage, self.blob_path)
+                                                          external_backup_storage)
         utils.write_in_json(path, self.status)
         if self.s3:
             try:
                 # upload status file
-                self.s3.upload_file(path)
+                self.s3.upload_file(path, self.blob_path, self.backup_id)
             except Exception as e:
                 raise e
 
@@ -178,21 +178,21 @@ class PostgreSQLRestoreWorker(Thread):
             dump_path = os.path.join(pg_dump_backup_path, database)
         else:
             dump_path = backups.build_database_backup_path(self.backup_id, database,
-                                                           self.namespace, self.external_backup_root, self.blob_path)
+                                                           self.namespace, self.external_backup_root)
         roles_backup_path = backups.build_roles_backup_path(self.backup_id, database,
-                                                            self.namespace, self.external_backup_root, self.blob_path)
+                                                            self.namespace, self.external_backup_root)
         stderr_path = backups.build_database_backup_path(self.backup_id, database,
-                                                         self.namespace, self.external_backup_root, self.blob_path)
+                                                         self.namespace, self.external_backup_root)
         stderr_path = stderr_path + '.stderr'
         stdout_path = backups.build_database_backup_path(self.backup_id, database,
-                                                         self.namespace, self.external_backup_root, self.blob_path)
+                                                         self.namespace, self.external_backup_root)
         sql_script_path = stdout_path + '.sql'
         stdout_path = stdout_path + '.stdout'
         if self.s3:
             try:
-                self.s3.download_file(dump_path)
+                self.s3.download_file(dump_path, self.backup_id, self.blob_path)
                 if self.restore_roles:
-                    self.s3.download_file(roles_backup_path)
+                    self.s3.download_file(roles_backup_path, self.backup_id, self.blob_path)
             except Exception as e:
                 raise e
         self.update_status('path',
@@ -560,7 +560,7 @@ class PostgreSQLRestoreWorker(Thread):
                     is_backup_exist = os.path.exists(path_for_parallel_flag_backup)
                 else:
                     is_backup_exist = backups.database_backup_exists(self.backup_id, database,
-                                                                     self.namespace, self.external_backup_root, self.blob_path)
+                                                                     self.namespace, self.external_backup_root)
             if not is_backup_exist:
                 raise backups.BackupNotFoundException(self.backup_id, database, self.namespace)
 
@@ -578,11 +578,11 @@ class PostgreSQLRestoreWorker(Thread):
             finally:
                 try:
                     if int(self.parallel_jobs) > 1:
-                        pg_dump_backup_path = backups.build_backup_path(self.backup_id, self.namespace, self.external_backup_root, self.blob_path)
+                        pg_dump_backup_path = backups.build_backup_path(self.backup_id, self.namespace, self.external_backup_root)
                         backup_path = os.path.join(pg_dump_backup_path, database)
                     else:
                         backup_path = backups.build_database_backup_path(self.backup_id, database,
-                                                                         self.namespace, self.external_backup_root, self.blob_path )
+                                                                         self.namespace, self.external_backup_root)
                         os.remove(backup_path + '.stderr')
                 except OSError as ex:
                     self.log.exception(self.log_msg("Unable to remove stderr log due to: %s " % str(ex)))

@@ -51,7 +51,7 @@ class PostgreSQLDumpWorker(Thread):
         self.parallel_jobs = configs.get_parallel_jobs()
         self.databases = databases if databases else []
         self.blob_path = blob_path
-        self.backup_dir = backups.build_backup_path(self.backup_id, self.namespace, self.external_backup_root, self.blob_path)
+        self.backup_dir = backups.build_backup_path(self.backup_id, self.namespace, self.external_backup_root)
         self.create_backup_dir()
         self.s3 = storage_s3.AwsS3Vault() if os.environ['STORAGE_TYPE'] == "s3" else None
         self._cancel_event = Event()
@@ -112,12 +112,12 @@ class PostgreSQLDumpWorker(Thread):
             self.flush_status(self.external_backup_root)
 
     def flush_status(self, external_backup_storage=None):
-        path = backups.build_backup_status_file_path(self.backup_id, self.namespace, external_backup_storage, self.blob_path)
+        path = backups.build_backup_status_file_path(self.backup_id, self.namespace, external_backup_storage)
         utils.write_in_json(path, self.status)
         if self.s3:
             try:
                 # upload dumpfile
-                self.s3.upload_file(path)
+                self.s3.upload_file(path, self.blob_path, self.backup_id)
             except Exception as e:
                 raise e
 
@@ -271,7 +271,7 @@ class PostgreSQLDumpWorker(Thread):
                     command.extend(['-T','cron.*'])
 
             database_backup_path = backups.build_database_backup_path(self.backup_id, database,
-                                                                  self.namespace, self.external_backup_root, blob_path=self.blob_path)
+                                                                  self.namespace, self.external_backup_root)
 
             with open(database_backup_path, 'w+') as dump, \
                     open(self.stderr_file(database), "w+") as stderr:
@@ -297,9 +297,9 @@ class PostgreSQLDumpWorker(Thread):
         if self.s3:
             try:
                 # upload dumpfile
-                self.s3.upload_file(database_backup_path)
+                self.s3.upload_file(database_backup_path, self.blob_path, self.backup_id)
                 # upload errorfile
-                self.s3.upload_file(self.stderr_file(database))
+                self.s3.upload_file(self.stderr_file(database), self.blob_path, self.backup_id)
             except Exception as e:
                 raise e
 
@@ -351,9 +351,9 @@ class PostgreSQLDumpWorker(Thread):
         self.log.debug(self.log_msg("Roles {} have been fetched for backup ".format(rolesList)))
 
         roles_backup_path = backups.build_roles_backup_path(self.backup_id, database,
-                                                            self.namespace, self.external_backup_root, self.blob_path)
+                                                            self.namespace, self.external_backup_root)
         database_backup_path = backups.build_database_backup_path(self.backup_id, database,
-                                                                  self.namespace, self.external_backup_root, self.blob_path)
+                                                                  self.namespace, self.external_backup_root)
 
         pg_dump_backup_path = backups.build_backup_path(self.backup_id, self.namespace, self.external_backup_root)
         path_for_parallel_flag_backup = os.path.join(pg_dump_backup_path, database)
@@ -402,7 +402,7 @@ class PostgreSQLDumpWorker(Thread):
 
     def dump_roles_for_db(self, roles, database):
         roles_backup_path = backups.build_roles_backup_path(self.backup_id, database,
-                                                            self.namespace, self.external_backup_root, self.blob_path)
+                                                            self.namespace, self.external_backup_root)
 
         with open(roles_backup_path, 'w+') as dump, \
                 open(self.stderr_file(database), "w+") as stderr:
@@ -434,7 +434,7 @@ class PostgreSQLDumpWorker(Thread):
             if self.s3:
                 try:
                     logging.info("Streaming {} roles to AWS".format(database))
-                    self.s3.upload_file(roles_backup_path)
+                    self.s3.upload_file(roles_backup_path, self.blob_path, self.backup_id)
                 except Exception as e:
                     raise e
                 finally:

@@ -77,12 +77,12 @@ def is_valid_namespace(namespace):
     return re.match("^[a-zA-z0-9_]+$", namespace) is not None
 
 
-def backup_exists(backup_id, namespace=configs.default_namespace(), external_backup_storage=None, blob_path=None):
-    return os.path.exists(build_backup_path(backup_id, namespace, external_backup_storage, blob_path))
+def backup_exists(backup_id, namespace=configs.default_namespace(), external_backup_storage=None):
+    return os.path.exists(build_backup_path(backup_id, namespace, external_backup_storage))
 
 
-def database_backup_exists(backup_id, database, namespace=configs.default_namespace(), external_backup_storage=None, blob_path=None):
-    return os.path.exists(build_database_backup_path(backup_id, database, namespace, external_backup_storage, blob_path))
+def database_backup_exists(backup_id, database, namespace=configs.default_namespace(), external_backup_storage=None):
+    return os.path.exists(build_database_backup_path(backup_id, database, namespace, external_backup_storage))
 
 
 def build_namespace_path(namespace=configs.default_namespace()):

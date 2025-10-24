@@ -1087,8 +1087,6 @@ class NewBackup(flask_restful.Resource):
 
         blob_path = normalize_blobPath(blob_path)
 
-        blob_path = normalize_blobPath(blob_path)
-
         # Reuse old logic directly
         backup_request = {
             "databases": list(databases),
@@ -1162,8 +1160,7 @@ class NewBackupStatus(flask_restful.Resource):
         if not backups.is_valid_namespace(namespace):
             return "Invalid namespace name: %s." % namespace.encode("utf-8"), http.client.BAD_REQUEST
 
-        blob_path = request.args.get("blobPath")
-        blob_path = normalize_blobPath(blob_path)
+        blob_path = normalize_blobPath(request.args.get("blobPath"))
         status_path = backups.build_backup_status_file_path(backup_id, blob_path=blob_path)
 
         
@@ -1172,7 +1169,7 @@ class NewBackupStatus(flask_restful.Resource):
         except Exception:
             return "Backup in bucket is not found.", http.client.NOT_FOUND
 
-        if blob_path and not (raw.get("blobPath") or raw.get("externalBackupPath")):
+        if blob_path and not raw.get("blobPath"):
             raw["blobPath"] = blob_path
 
         return backups.transform_backup_status_v1(raw), http.client.OK
@@ -1301,7 +1298,6 @@ class NewRestore(flask_restful.Resource):
         if not isinstance(pairs, (list, tuple)):
             return {"message": "databases must be an array of objects"}, http.client.BAD_REQUEST
         blob_path = normalize_blobPath(blob_path)
-        blob_path = normalize_blobPath(blob_path)
 
         databases = []
         databases_mapping = {}
@@ -1318,7 +1314,6 @@ class NewRestore(flask_restful.Resource):
         if not backups.is_valid_namespace(namespace):
             return "Invalid namespace name: %s." % namespace.encode("utf-8"), http.client.BAD_REQUEST
 
-        external_backup_path = blob_path
         backup_details_file = backups.build_backup_status_file_path(backup_id, blob_path=blob_path)
 
         try:
@@ -1370,7 +1365,7 @@ class NewRestore(flask_restful.Resource):
         if not dry_run:
             worker = pg_restore.PostgreSQLRestoreWorker(
                 requested, force,
-                {"backupId": backup_id, "namespace": namespace, "externalBackupPath": external_backup_path, "trackingId": tracking_id},
+                {"backupId": backup_id, "namespace": namespace, "trackingId": tracking_id},
                 databases_mapping, owners_mapping, restore_roles, single_transaction, body.get("dbaasClone"), blob_path
             )
             worker.start()
@@ -1382,7 +1377,6 @@ class NewRestore(flask_restful.Resource):
             created_iso = ""
 
         storage_name = body.get("storageName") or ""
-        blob_path = blob_path or external_backup_path or ""
 
         dbs_out = []
         for prev in (requested or []):
@@ -1418,19 +1412,13 @@ class NewRestore(flask_restful.Resource):
                                       "creationTime": created_iso} for prev in (requested or []) },
                 "storageName": storage_name,
                 "blobPath": blob_path,
-                "externalBackupPath": external_backup_path or "",
                 "sourceBackupId": backup_id
             }
 
             if dry_run:
                 return enriched, http.client.OK
 
-            try:
-                status_path = backups.build_restore_status_file_path(backup_id, tracking_id, namespace,
-                                                                     backups.build_external_backup_root(external_backup_path) if external_backup_path else None)
-            except TypeError:
-                status_path = backups.build_restore_status_file_path(backup_id, tracking_id, namespace)
-            status_path = backups.build_restore_status_file_path(backup_id, tracking_id, blob_path=blob_path)
+            status_path = backups.build_restore_status_file_path(backup_id, tracking_id, namespace)
 
             try:
                 if hasattr(utils, "write_in_json"):
@@ -1476,8 +1464,7 @@ class NewRestoreStatus(flask_restful.Resource):
         if not backups.is_valid_namespace(namespace):
             return "Invalid namespace name: %s." % namespace.encode("utf-8"), http.client.BAD_REQUEST
 
-        blob_path = request.args.get("blobPath")
-        blob_path = normalize_blobPath(blob_path)
+        blob_path = normalize_blobPath(request.args.get("blobPath"))
         storage_name = request.args.get("storageName") or os.environ.get("STORAGE_NAME")
         status_path = backups.build_restore_status_file_path(backup_id, restore_id, blob_path=blob_path)
 
@@ -1486,7 +1473,7 @@ class NewRestoreStatus(flask_restful.Resource):
         except Exception:
             return "Backup in bucket is not found.", http.client.NOT_FOUND
 
-        if blob_path and not (raw.get("blobPath") or raw.get("externalBackupPath")):
+        if blob_path and not raw.get("blobPath"):
             raw["blobPath"] = blob_path
         if storage_name and not raw.get("storageName"):
             raw["storageName"] = storage_name
@@ -1533,7 +1520,7 @@ class NewRestoreStatus(flask_restful.Resource):
                 "termination": {"code": term_code, "body": term_body}
             }, http.client.OK
 
-        blob_path = request.args.get("blobPath") or request.args.get("externalBackupPath")
+        blob_path = request.args.get("blobPath")
         if not blob_path:
             return {
                 "restoreId": restore_id,
@@ -1606,18 +1593,12 @@ class NewRestoreStatus(flask_restful.Resource):
             return {
                 "restoreId": restore_id,
                 "message": f"Termination attempted; cleanup encountered an error: {e}",
-                "status": "Successful",
+                "status": "Failed",
                 "termination": {"code": term_code, "body": term_body}
-            }, http.client.OK
-
-        if term_code == 404:
-            return {"restoreId": restore_id, "message": "Restore is not found.", "status": "Failed",
-                    "termination": {"code": term_code, "body": term_body}}, http.client.NOT_FOUND
+            }, http.client.INTERNAL_SERVER_ERROR
 
         if term_code and 200 <= term_code < 300:
             msg = "Restore terminated successfully. Cleanup completed."
-        elif term_code == 404:
-            msg = "No active restore (already finished or not found). Cleanup completed."
         else:
             msg = "Termination attempted. Cleanup completed."
 
@@ -1627,8 +1608,8 @@ class NewRestoreStatus(flask_restful.Resource):
 def normalize_blobPath(blob_path):
     # Normalize blob_path by removing a single leading and trailing slash
     if isinstance(blob_path, str):
-        if not blob_path.startswith("/"):
-            blob_path = f'/{blob_path}'
+        if blob_path.startswith("/"):
+            blob_path = blob_path[1:]
         if blob_path.endswith("/"):
             blob_path = blob_path[:-1]
     return blob_path
