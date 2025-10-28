@@ -1073,7 +1073,7 @@ class NewBackup(flask_restful.Resource):
     @auth.login_required
     def post(self):
         if not self.s3:
-            "S3 is not configured for backup daemon", http.client.FORBIDDEN
+            return "S3 is not configured for backup daemon", http.client.FORBIDDEN
 
         body = request.get_json(silent=True) or {}
         storage_name = body.get("storageName")
@@ -1151,7 +1151,7 @@ class NewBackupStatus(flask_restful.Resource):
     @auth.login_required
     def get(self, backup_id):
         if not self.s3:
-            "S3 is not configured for backup daemon", http.client.FORBIDDEN
+            return "S3 is not configured for backup daemon", http.client.FORBIDDEN
 
         if not backup_id:
             return "Backup ID is not specified.", http.client.BAD_REQUEST
@@ -1178,7 +1178,7 @@ class NewBackupStatus(flask_restful.Resource):
     @superuser_authorization
     def delete(self, backup_id):
         if not self.s3:
-            "S3 is not configured for backup daemon", http.client.FORBIDDEN
+            return "S3 is not configured for backup daemon", http.client.FORBIDDEN
 
         if not backup_id:
             return {"backupId": backup_id, "message": "Backup ID is not specified", "status": "Failed"}, http.client.BAD_REQUEST
@@ -1283,7 +1283,7 @@ class NewRestore(flask_restful.Resource):
     @superuser_authorization
     def post(self, backup_id):
         if not self.s3:
-            "S3 is not configured for backup daemon", http.client.FORBIDDEN
+            return "S3 is not configured for backup daemon", http.client.FORBIDDEN
 
         body = request.get_json(silent=True) or {}
         blob_path = body.get("blobPath")
@@ -1450,7 +1450,7 @@ class NewRestoreStatus(flask_restful.Resource):
     @superuser_authorization
     def get(self, restore_id):
         if not self.s3:
-            "S3 is not configured for backup daemon", http.client.FORBIDDEN
+            return "S3 is not configured for backup daemon", http.client.FORBIDDEN
 
         if not restore_id:
             return "Restore tracking ID is not specified.", http.client.BAD_REQUEST
@@ -1484,7 +1484,7 @@ class NewRestoreStatus(flask_restful.Resource):
     @superuser_authorization
     def delete(self, restore_id):
         if not self.s3:
-            "S3 is not configured for backup daemon", http.client.FORBIDDEN
+            return "S3 is not configured for backup daemon", http.client.FORBIDDEN
 
         if not restore_id:
             return {"restoreId": restore_id, "message": "Restore ID is not specified", "status": "Failed"}, http.client.BAD_REQUEST
@@ -1609,7 +1609,11 @@ def normalize_blobPath(blob_path):
     # Normalize blob_path by removing a single leading and trailing slash
     if isinstance(blob_path, str):
         if blob_path.startswith("/"):
-            blob_path = blob_path[1:]
+            if not os.getenv("AWS_S3_PREFIX", ""):
+                blob_path = blob_path[1:]
+        else:
+            if os.getenv("AWS_S3_PREFIX", ""):
+                blob_path = "/" + blob_path
         if blob_path.endswith("/"):
             blob_path = blob_path[:-1]
     return blob_path
