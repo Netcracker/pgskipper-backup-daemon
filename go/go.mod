@@ -1,6 +1,6 @@
 module github.com/Netcracker/pgskipper-backup-daemon
 
-go 1.25.1
+go 1.25.3
 
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.4.0
